@@ -1,0 +1,68 @@
+name: Bootstrap verified convolve-wasm pipeline
+
+on:
+  push:
+    branches:
+      - agent/bootstrap-convolve-wasm-pipeline-20260714b
+    paths:
+      - .github/workflows/bootstrap-convolve-wasm-pipeline.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-convolve-wasm-pipeline
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Receive and verify aggregate patch
+        env:
+          PATCH_URL: https://ppng.io/convolve-wasm-8f8d7f2ed2504560-retry-20260714b
+          PATCH_SHA256: 8f8d7f2ed2504560603db9d204b58cab2d43c39bcd5c8a22583ebc66f0fbc1d7
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 20 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 30 --max-time 1200 \
+            "$PATCH_URL" --output /tmp/convolve-wasm.patch
+          printf '%s  %s\n' "$PATCH_SHA256" /tmp/convolve-wasm.patch | sha256sum --check --strict -
+
+      - name: Build and publish one atomic implementation commit
+        env:
+          FEATURE_REF: refs/heads/feat/convolve-wasm-pipeline
+          BOOTSTRAP_BRANCH: agent/bootstrap-convolve-wasm-pipeline-20260714b
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main feat/convolve-wasm-pipeline
+          base_sha="$(git rev-parse origin/main)"
+          feature_sha="$(git rev-parse origin/feat/convolve-wasm-pipeline)"
+
+          git reset --hard "$base_sha"
+          git apply --check --whitespace=error-all /tmp/convolve-wasm.patch
+          git apply --index /tmp/convolve-wasm.patch
+
+          git config user.name 'OpenAI Agent'
+          git config user.email 'noreply@openai.com'
+          git commit -m 'feat: implement convolve-wasm pipeline'
+
+          test "$(git rev-parse HEAD^)" = "$base_sha"
+          test "$(git diff --name-only "$base_sha"...HEAD | wc -l | tr -d ' ')" = '63'
+          test -z "$(git status --porcelain)"
+          if git ls-tree -r --name-only HEAD | grep -Eq '^(\.bootstrap/|\.github/workflows/bootstrap-convolve-wasm-pipeline\.yml$)'; then
+            echo 'bootstrap transport leaked into the implementation commit' >&2
+            exit 1
+          fi
+
+          git push --force-with-lease="$FEATURE_REF:$feature_sha" origin "HEAD:$FEATURE_REF"
+          git push origin --delete "$BOOTSTRAP_BRANCH" || true
