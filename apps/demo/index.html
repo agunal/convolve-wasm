@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Convolve two audio files locally in a Rust/WebAssembly worker."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%23b74729%22/><path d=%22M16 32h8l4-12 8 24 4-12h8%22 fill=%22none%22 stroke=%22white%22 stroke-width=%226%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>"
+    />
+    <title>Convolve WASM</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Local audio laboratory</p>
+        <h1>Convolve <span>WASM</span></h1>
+        <p class="lede">
+          Combine two WAV or browser-decodable M4A files without uploading
+          audio. Processing stays in this tab and runs in a dedicated worker.
+        </p>
+      </header>
+
+      <section class="panel" aria-labelledby="inputs-heading">
+        <div class="section-heading">
+          <p class="step">01</p>
+          <div>
+            <h2 id="inputs-heading">Choose source audio</h2>
+            <p>Mono is duplicated to stereo. Stereo channels remain discrete.</p>
+          </div>
+        </div>
+
+        <div class="file-grid">
+          <label class="file-field" for="audio-a">
+            <span>Audio A</span>
+            <input
+              id="audio-a"
+              type="file"
+              accept=".wav,.m4a,audio/wav,audio/mp4"
+              required
+            />
+          </label>
+          <label class="file-field" for="audio-b">
+            <span>Audio B</span>
+            <input
+              id="audio-b"
+              type="file"
+              accept=".wav,.m4a,audio/wav,audio/mp4"
+              required
+            />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="effects-heading">
+        <div class="section-heading">
+          <p class="step">02</p>
+          <div>
+            <h2 id="effects-heading">Shape the render</h2>
+            <p>Effects run after full wet-only stereo convolution.</p>
+          </div>
+        </div>
+
+        <div class="controls-grid">
+          <label for="beat-pan">
+            Beat pan source
+            <select id="beat-pan">
+              <option value="">Off</option>
+              <option value="a">Audio A</option>
+              <option value="b">Audio B</option>
+            </select>
+          </label>
+
+          <label for="pan-transition-ms">
+            Pan transition (ms)
+            <input id="pan-transition-ms" type="number" min="0" value="20" />
+          </label>
+
+          <label for="reverse-crossfade-ms">
+            Reverse crossfade (ms)
+            <input
+              id="reverse-crossfade-ms"
+              type="number"
+              min="0"
+              value="5"
+            />
+          </label>
+
+          <label for="target-dbtp">
+            True-peak target (dBTP)
+            <input
+              id="target-dbtp"
+              type="number"
+              min="-24"
+              max="0"
+              step="0.1"
+              value="-1"
+            />
+          </label>
+        </div>
+
+        <label class="check-row" for="append-reverse">
+          <input id="append-reverse" type="checkbox" />
+          <span>
+            Append exact reverse
+            <small>Uses the crossfade above at the midpoint.</small>
+          </span>
+        </label>
+      </section>
+
+      <section class="run-panel" aria-labelledby="render-heading">
+        <div>
+          <p class="step">03</p>
+          <h2 id="render-heading">Render locally</h2>
+        </div>
+        <button id="run" type="button">Convolve audio</button>
+      </section>
+
+      <section class="result-panel" aria-live="polite">
+        <output id="status" data-state="idle">Ready for two files.</output>
+        <div class="result-actions">
+          <audio id="preview" controls preload="metadata"></audio>
+          <a id="download" class="download" aria-disabled="true">
+            Download WAV
+          </a>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

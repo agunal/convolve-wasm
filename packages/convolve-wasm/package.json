@@ -1,0 +1,22 @@
+{
+  "name": "@agunal/convolve-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run",
+    "build:js": "vite build",
+    "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "build": "npm run build:js && npm run build:types"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  }
+}

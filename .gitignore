@@ -1,0 +1,8 @@
+node_modules/
+dist/
+**/dist/
+target/
+playwright-report/
+test-results/
+blob-report/
+packages/convolve-wasm/src/wasm/

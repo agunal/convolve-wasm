@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: convolve-wasm
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --workspace
+
+      - name: Build WASM bindings
+        run: npm run build:wasm
+
+      - name: Test TypeScript and package consumer
+        run: npm run test:ts
+
+      - name: Build library and demo
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Test generated WASM in Chromium
+        run: wasm-pack test --headless --chrome crates/convolve-core
+
+      - name: Test browser demo in Chromium and WebKit
+        run: npm run test:e2e
+
+      - name: Inspect package contents
+        run: npm pack -w @agunal/convolve-wasm --dry-run
+
+      - name: Verify prebuilt FFmpeg core is absent
+        shell: bash
+        run: |
+          set +e
+          output=$(npm ls @ffmpeg/core 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -eq 0 ] || grep -q '@ffmpeg/core@' <<<"$output"; then
+            echo "@ffmpeg/core must not be present" >&2
+            exit 1
+          fi
