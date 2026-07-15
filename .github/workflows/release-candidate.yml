@@ -1,0 +1,180 @@
+name: Build Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact merged commit to verify and pack
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out exact source commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+
+      - name: Verify exact current main commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_commit }}" =~ ^[0-9a-f]{40}$ ]]
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "${{ inputs.source_commit }}"
+          git fetch --force origin refs/heads/main:refs/remotes/origin/main
+          main_commit=$(git rev-parse origin/main)
+          test "$actual" = "$main_commit"
+          test -z "$(git status --porcelain)"
+          printf 'Source commit: %s\n' "$actual"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Pin supported npm CLI
+        run: npm install --global npm@11.5.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Verify release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const manifest = require('./packages/convolve-wasm/package.json');
+          const failures = [];
+          if (manifest.name !== '@agunal/convolve-wasm') failures.push('unexpected package name');
+          if (manifest.version !== '0.1.0') failures.push('unexpected package version');
+          if (manifest.private === true) failures.push('package is still private');
+          if (manifest.publishConfig?.access !== 'public') failures.push('public access is not enforced');
+          if (manifest.publishConfig?.provenance !== true) failures.push('provenance is not enabled');
+          if (manifest.repository?.url !== 'git+https://github.com/agunal/convolve-wasm.git') failures.push('repository URL mismatch');
+          if (failures.length) {
+            console.error(failures.join('\n'));
+            process.exit(1);
+          }
+          NODE
+
+      - name: Verify manual browser matrix is complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          for browser in Chrome Edge Safari; do
+            mapfile -t rows < <(grep -E "^\\| $browser \\|" docs/browser-support.md)
+            if [ "${#rows[@]}" -ne 1 ]; then
+              echo "Expected exactly one $browser matrix row" >&2
+              exit 1
+            fi
+            row="${rows[0]}"
+            if grep -q '—' <<<"$row"; then
+              echo "$browser matrix row still contains blank fields: $row" >&2
+              exit 1
+            fi
+            if ! grep -Eq '\| Pass \|$' <<<"$row"; then
+              echo "$browser matrix row is not a recorded pass: $row" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --workspace
+
+      - name: Build WASM bindings
+        run: npm run build:wasm
+
+      - name: Test TypeScript and package consumer
+        run: npm run test:ts
+
+      - name: Build library and demo
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Test generated WASM in Chrome
+        run: wasm-pack test --headless --chrome crates/convolve-core
+
+      - name: Test browser demo in Chromium and WebKit
+        run: npm run test:e2e
+
+      - name: Pack and inspect exact artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/npm-release-candidate"
+          mkdir "$artifact_dir"
+
+          npm pack --json --pack-destination "$artifact_dir" -w @agunal/convolve-wasm \
+            > "$artifact_dir/pack.json"
+
+          mapfile -t tarballs < <(find "$artifact_dir" -maxdepth 1 -type f -name '*.tgz' -print)
+          test "${#tarballs[@]}" -eq 1
+          tarball="${tarballs[0]}"
+
+          tar -tzf "$tarball" | LC_ALL=C sort | tee "$artifact_dir/CONTENTS.txt"
+          (cd "$artifact_dir" && sha256sum "$(basename "$tarball")" | tee SHA256SUMS)
+
+          mkdir "$artifact_dir/unpacked"
+          tar -xzf "$tarball" -C "$artifact_dir/unpacked"
+
+          if grep -R -n -F '@ffmpeg/core' "$artifact_dir/unpacked/package"; then
+            echo '@ffmpeg/core found in packed artifact' >&2
+            exit 1
+          fi
+
+          set +e
+          ffmpeg_tree=$(npm ls @ffmpeg/core 2>&1)
+          ffmpeg_status=$?
+          set -e
+          printf '%s\n' "$ffmpeg_tree"
+          if [ "$ffmpeg_status" -eq 0 ] || grep -q '@ffmpeg/core@' <<<"$ffmpeg_tree"; then
+            echo '@ffmpeg/core must be absent from the dependency tree' >&2
+            exit 1
+          fi
+
+          rm -rf "$artifact_dir/unpacked"
+          printf 'source_commit=%s\n' "$(git rev-parse HEAD)" > "$artifact_dir/RELEASE-METADATA.txt"
+          printf 'tarball=%s\n' "$(basename "$tarball")" >> "$artifact_dir/RELEASE-METADATA.txt"
+          cat "$artifact_dir/pack.json" >> "$artifact_dir/RELEASE-METADATA.txt"
+
+          test -z "$(git status --porcelain)"
+
+      - name: Upload inspected release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-release-candidate
+          path: |
+            ${{ runner.temp }}/npm-release-candidate/*.tgz
+            ${{ runner.temp }}/npm-release-candidate/pack.json
+            ${{ runner.temp }}/npm-release-candidate/SHA256SUMS
+            ${{ runner.temp }}/npm-release-candidate/CONTENTS.txt
+            ${{ runner.temp }}/npm-release-candidate/RELEASE-METADATA.txt
+          if-no-files-found: error
+          retention-days: 30

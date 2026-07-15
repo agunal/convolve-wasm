@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agunal/convolve-wasm/v0.1.0/docs/assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
+</p>
+
 # @agunal/convolve-wasm
 
 Browser-side stereo audio convolution backed by a Rust/WebAssembly DSP core and a dedicated module worker.
