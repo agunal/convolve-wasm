@@ -7,7 +7,11 @@
       name="description"
       content="Convolve two audio files locally in a Rust/WebAssembly worker."
     />
-    <link rel="icon" type="image/png" href="/convolve-wasm-logo.png" />
+    <link
+      rel="icon"
+      type="image/png"
+      href="%BASE_URL%convolve-wasm-logo.png"
+    />
     <title>Convolve WASM</title>
   </head>
   <body>
@@ -15,11 +19,10 @@
       <header class="hero">
         <img
           class="brand-mark"
-          src="/convolve-wasm-logo.png"
+          src="%BASE_URL%convolve-wasm-logo.png"
           alt="convolve-wasm"
           width="192"
           height="192"
-          style="display: block; width: 192px; height: 192px; margin: 0 0 24px"
         />
         <p class="eyebrow">Local audio laboratory</p>
         <h1>Convolve <span>WASM</span></h1>
@@ -133,6 +136,53 @@
           </a>
         </div>
       </section>
+
+      <section id="about" class="about-panel" aria-labelledby="about-heading">
+        <div class="section-heading">
+          <p class="step">About</p>
+          <div>
+            <h2 id="about-heading">Private by architecture</h2>
+            <p>
+              Browser decoding, a dedicated module worker, and a Rust/WASM DSP
+              core keep the complete rendering pipeline inside this tab.
+            </p>
+          </div>
+        </div>
+
+        <div class="about-grid">
+          <article class="about-card">
+            <h3>Inputs and output</h3>
+            <p>
+              Use WAV or M4A supported by your browser and operating system.
+              Every successful render is a stereo 48 kHz signed PCM24 WAV.
+            </p>
+          </article>
+          <article class="about-card">
+            <h3>No hidden fallback</h3>
+            <p>
+              There is no upload service, server processor, or bundled
+              <code>@ffmpeg/core</code>. Unsupported M4A codecs fail explicitly.
+            </p>
+          </article>
+        </div>
+
+        <nav class="resource-links" aria-label="Project resources">
+          <a href="https://github.com/agunal/convolve-wasm">GitHub repository</a>
+          <a href="https://github.com/agunal/convolve-wasm/tree/main/packages/convolve-wasm">
+            Package documentation
+          </a>
+          <a href="https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md">
+            Browser support
+          </a>
+          <a href="https://github.com/agunal/convolve-wasm/blob/main/docs/releases/v0.1.0.md">
+            v0.1.0 release notes
+          </a>
+        </nav>
+      </section>
+
+      <footer class="site-footer">
+        <p>Your files are never uploaded. Closing the tab releases local results.</p>
+      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
