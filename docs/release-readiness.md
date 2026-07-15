@@ -98,8 +98,9 @@ Perform this inspection only after the separate final release pull request has m
 source_commit=$(git rev-parse HEAD)
 test -z "$(git status --porcelain)"
 
-release_pack_dir=$(mktemp -d)
-trap 'rm -rf "$release_pack_dir"' EXIT
+release_pack_dir=${RELEASE_PACK_DIR:-"$(mktemp -d)"}
+mkdir -p "$release_pack_dir"
+printf 'Release artifact directory: %s\n' "$release_pack_dir"
 
 npm ci
 npm run build:wasm
@@ -132,6 +133,8 @@ if [ "$ffmpeg_status" -eq 0 ] || grep -q '@ffmpeg/core@' <<<"$ffmpeg_tree"; then
   exit 1
 fi
 ```
+
+Do not delete or overwrite `release_pack_dir` after inspection. Preserve it until the artifact is either published or the release is explicitly abandoned. In automation, upload the `.tgz`, `pack.json`, and SHA-256 record before the workspace is cleaned up.
 
 Record all of the following in the release approval record:
 
