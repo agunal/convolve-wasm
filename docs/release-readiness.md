@@ -83,9 +83,9 @@ The workflow then runs `npm pack` once, inspects the exact `.tgz`, writes `pack.
 `.github/workflows/publish.yml` is a separate manual workflow protected by the `npm` environment. It requires:
 
 ```text
-source_commit:     exact tagged source SHA
-artifact_run_id:   successful Build Release Candidate workflow run
- tarball_sha256:   approved lowercase SHA-256
+source_commit:    exact tagged source SHA
+artifact_run_id:  successful Build Release Candidate workflow run
+tarball_sha256:   approved lowercase SHA-256
 ```
 
 It verifies:
