@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - test/browser-matrix-probe
+  pull_request:
+    branches:
+      - release/v0.1.0-final
 
 permissions:
   contents: read
