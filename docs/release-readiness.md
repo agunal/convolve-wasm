@@ -31,11 +31,7 @@ The owner authorized preparation of these release choices:
 | Generated WASM | Remains ignored in the source tree; only built distribution assets are packed |
 | FFmpeg boundary | `@ffmpeg/core` remains absent |
 
-These choices authorize preparation and review only. They do not authorize merge, tag creation, GitHub release creation, registry changes, or publication.
-
-## Current branch verification
-
-GitHub Actions run `29387616683` completed successfully for head `48ccd2e5f0412a9975fbf1b88582b1291eb9a408`. It passed Rust formatting, Clippy and tests, the WASM build and Chrome smoke tests, TypeScript/package-consumer tests, library and demo builds, Chromium and WebKit E2E, package inspection, and the `@ffmpeg/core` absence gate.
+These choices authorize preparation and review only. They do not authorize merge, tag creation, GitHub release creation, registry changes, or publication. Current-head CI evidence is recorded in the final release pull-request description so updating that evidence does not change the release branch commit.
 
 ## Hard blockers before merge
 
