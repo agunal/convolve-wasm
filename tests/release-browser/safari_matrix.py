@@ -7,7 +7,6 @@ import platform
 import re
 import struct
 import time
-import wave
 from pathlib import Path
 
 from selenium import webdriver
@@ -17,6 +16,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 FIXTURE_DIR = Path(os.environ.get("FIXTURE_DIR", "release-browser-fixture")).resolve()
 CAPTURE_DIR = Path(os.environ.get("CAPTURE_DIR", "release-browser-results/macos")).resolve()
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:4173")
+PCM_SUBFORMAT_GUID = bytes.fromhex("0100000000001000800000aa00389b71")
 CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -25,11 +25,11 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def parse_wav(path: Path) -> dict[str, int]:
+def parse_wav(path: Path) -> dict[str, int | bool]:
     payload = path.read_bytes()
     require(payload[:4] == b"RIFF" and payload[8:12] == b"WAVE", f"{path}: invalid RIFF/WAVE")
     offset = 12
-    fmt: dict[str, int] | None = None
+    fmt: dict[str, int | bool] | None = None
     data: bytes | None = None
     while offset + 8 <= len(payload):
         chunk_id = payload[offset : offset + 4]
@@ -38,8 +38,14 @@ def parse_wav(path: Path) -> dict[str, int]:
         if chunk_id == b"fmt ":
             audio_format, channels, sample_rate = struct.unpack_from("<HHI", payload, start)
             block_align, bits_per_sample = struct.unpack_from("<HH", payload, start + 12)
+            extensible_pcm = (
+                audio_format == 0xFFFE
+                and size >= 40
+                and payload[start + 24 : start + 40] == PCM_SUBFORMAT_GUID
+            )
             fmt = {
                 "audioFormat": audio_format,
+                "extensiblePcm": extensible_pcm,
                 "channels": channels,
                 "sampleRate": sample_rate,
                 "blockAlign": block_align,
@@ -49,10 +55,10 @@ def parse_wav(path: Path) -> dict[str, int]:
             data = payload[start : start + size]
         offset = start + size + (size % 2)
     require(fmt is not None and data is not None, f"{path}: missing fmt/data")
-    require(fmt["audioFormat"] == 1, f"{path}: not PCM")
+    require(fmt["audioFormat"] == 1 or fmt["extensiblePcm"], f"{path}: not PCM or PCM extensible: {fmt}")
     require(fmt["channels"] == 2 and fmt["sampleRate"] == 48_000 and fmt["bitsPerSample"] == 24, f"{path}: unexpected format {fmt}")
-    require(len(data) % fmt["blockAlign"] == 0, f"{path}: partial frame")
-    frames = len(data) // fmt["blockAlign"]
+    require(len(data) % int(fmt["blockAlign"]) == 0, f"{path}: partial frame")
+    frames = len(data) // int(fmt["blockAlign"])
     maximum = 0
     nonzero = 0
     for index in range(0, len(data), 3):
