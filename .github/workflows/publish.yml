@@ -28,6 +28,14 @@ jobs:
     environment: npm
 
     steps:
+      - name: Validate approval inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.source_commit }}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.artifact_run_id }}" =~ ^[0-9]+$ ]]
+          [[ "${{ inputs.tarball_sha256 }}" =~ ^[0-9a-f]{64}$ ]]
+
       - name: Check out exact source commit
         uses: actions/checkout@v6
         with:
@@ -122,11 +130,16 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          existing=$(npm view @agunal/convolve-wasm@0.1.0 version 2>/dev/null)
+          view_output=$(npm view @agunal/convolve-wasm@0.1.0 version 2>&1)
           status=$?
           set -e
+          printf '%s\n' "$view_output"
           if [ "$status" -eq 0 ]; then
-            echo "@agunal/convolve-wasm@0.1.0 is already published: $existing" >&2
+            echo '@agunal/convolve-wasm@0.1.0 is already published' >&2
+            exit 1
+          fi
+          if ! grep -q 'E404' <<<"$view_output"; then
+            echo 'Registry lookup failed for a reason other than version absence' >&2
             exit 1
           fi
 
