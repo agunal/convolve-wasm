@@ -1,12 +1,12 @@
 # v0.1.0 final release readiness
 
-**Status:** Draft final release candidate. The package metadata is prepared on `release/v0.1.0-final`, but merge, tagging, GitHub release creation, and npm publication remain prohibited until every blocker and authorization gate below is satisfied.
+**Status:** Draft final release candidate. The package metadata and real-browser HE-AAC evidence are prepared on `release/v0.1.0-final`, but merge, tagging, GitHub release creation, and npm publication remain prohibited until the registry controls, final review, and explicit authorization gates below are satisfied.
 
 **Merged readiness baseline:** `main` at `60e79cf38174fc0d90df47cbee5f21d274821a43`.
 
 **Final release branch:** `release/v0.1.0-final`.
 
-The manual desktop HE-AAC matrix is not available in the current execution environment and remains a hard release blocker. No blank row or automated WebKit result may be converted into a manual pass.
+The branded Chrome, branded Edge, and system Safari HE-AAC matrix passed on 2026-07-15 against the unchanged production build. The complete fixture, browser, formula, output, playback/download, and hash record is in [the hosted release-browser matrix report](testing/2026-07-15-hosted-release-browser-matrix.md).
 
 ## Approved preparation decisions
 
@@ -33,16 +33,24 @@ The owner authorized preparation of these release choices:
 
 These choices authorize preparation and review only. They do not authorize merge, tag creation, GitHub release creation, registry changes, or publication. Current-head CI evidence is recorded in the final release pull-request description so updating that evidence does not change the release branch commit.
 
-## Hard blockers before merge
+## Gate status before merge
 
-- [ ] Complete and record the real stereo 48 kHz HE-AAC matrix in `docs/browser-support.md` on current desktop Chrome, Edge, and Safari.
-- [ ] Record exact browser and operating-system versions.
-- [ ] Record the exact AAC profile or object type and the inspection tool used.
-- [ ] Pass plain convolution in every browser.
-- [ ] Pass `beatPan: "a"` with reverse append in every browser.
-- [ ] Play and download both outputs in every browser.
-- [ ] Confirm stereo 48 kHz PCM24 metadata and expected frame formulas.
-- [ ] Confirm finite non-silent peak metadata, no clipping, and no page errors.
+### Completed browser gate
+
+- [x] Generate and inspect a deterministic stereo 48 kHz HE-AAC M4A and WAV impulse without committing audio.
+- [x] Record exact Chrome, Edge, Safari, and operating-system versions.
+- [x] Record the exact Apple HE-AAC `aach` encoder identifier and the `afconvert` / `afinfo` inspection tools.
+- [x] Pass the unchanged repository demo/package/worker/WASM path in branded Chrome, branded Edge, and system Safari.
+- [x] Pass plain convolution in every browser.
+- [x] Pass `beatPan: "a"` with reverse append in every browser.
+- [x] Start playback and activate the download path for both outputs in every browser.
+- [x] Confirm WAVE_FORMAT_EXTENSIBLE PCM24, stereo, 48 kHz metadata and browser-specific frame formulas.
+- [x] Confirm finite non-silent peak metadata, no clipping, and no page errors.
+
+Evidence: GitHub Actions run `29392630499`, where `fixture`, `windows-matrix`, and `safari-matrix` all completed successfully. The report records the input hashes, output hashes, artifact IDs, and artifact digests.
+
+### Remaining blockers
+
 - [ ] Configure npm trusted publishing for this repository and workflow.
 - [ ] Configure a protected GitHub environment named `npm` with an owner approval gate.
 - [ ] Confirm that npm trusted publishing supports this first publication path; if not, stop and separately review any bootstrap path.
@@ -128,11 +136,11 @@ inspection date:
 6. Run **Publish Inspected npm Artifact** with those exact approved values.
 7. Create a GitHub release only if separately authorized.
 
-Any mismatch in commit, workflow run, filename, hash, package metadata, manual matrix, tag, registry configuration, or downloaded artifact voids the authorization and stops the release.
+Any mismatch in commit, workflow run, filename, hash, package metadata, browser matrix, tag, registry configuration, or downloaded artifact voids the authorization and stops the release.
 
 ## Current prohibited actions
 
-Until every gate above is satisfied:
+Until every remaining blocker is satisfied:
 
 - do not merge the final release pull request;
 - do not create `v0.1.0`;
@@ -140,4 +148,4 @@ Until every gate above is satisfied:
 - do not run either release workflow against an unapproved commit;
 - do not publish to npm;
 - do not add a long-lived npm publish token;
-- do not commit private HE-AAC audio or generated source-tree WASM.
+- do not commit private HE-AAC audio, deterministic browser fixtures, output audio, or generated source-tree WASM.
