@@ -1,0 +1,54 @@
+name: Browser Matrix Probe
+
+on:
+  push:
+    branches:
+      - test/browser-matrix-probe
+
+permissions:
+  contents: read
+
+jobs:
+  macos-probe:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe Safari and Apple audio tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          system_profiler SPSoftwareDataType
+          /usr/bin/safaridriver --version || true
+          defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString || true
+          defaults read /Applications/Safari.app/Contents/Info CFBundleVersion || true
+          /usr/bin/afconvert -hf || true
+          /usr/bin/afconvert -h || true
+          ls -la /Applications/Safari.app/Contents/MacOS/Safari || true
+
+  windows-probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Probe Chrome and Edge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsBuildNumber
+          $paths = @(
+            "$Env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+            "${Env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+            "$Env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+            "${Env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              Write-Host "FOUND $path"
+              & $path --version
+              (Get-Item $path).VersionInfo | Format-List FileVersion, ProductVersion
+            }
+          }
+          node --version
+          npm --version
