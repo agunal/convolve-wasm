@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
+</p>
+
 # convolve-wasm
 
 Client-side stereo audio convolution powered by a Rust/WASM DSP core and a dedicated browser worker. Audio is decoded and processed locally; the library does not upload source files or rendered output.
