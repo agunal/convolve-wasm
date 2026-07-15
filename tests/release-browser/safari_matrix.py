@@ -76,21 +76,78 @@ def async_script(driver: webdriver.Safari, script: str, *args):
     return driver.execute_async_script(script, *args)
 
 
-def decode_shapes(driver: webdriver.Safari) -> dict:
+def decode_diagnostics(driver: webdriver.Safari) -> dict:
     return async_script(
         driver,
         """
         const done = arguments[arguments.length - 1];
         (async () => {
-          async function decode(selector) {
+          async function decode(selector, kind) {
             const input = document.querySelector(selector);
-            if (!input?.files?.[0]) throw new Error(`missing file for ${selector}`);
+            if (!input?.files?.[0]) return { ok: false, error: `missing file for ${selector}` };
             const bytes = await input.files[0].arrayBuffer();
-            const context = new OfflineAudioContext(2, 1, 48000);
-            const decoded = await context.decodeAudioData(bytes.slice(0));
-            return { frames: decoded.length, channels: decoded.numberOfChannels, sampleRate: decoded.sampleRate };
+            let context;
+            try {
+              context = kind === 'offline'
+                ? new OfflineAudioContext(2, 1, 48000)
+                : new AudioContext({ sampleRate: 48000 });
+              const decoded = await context.decodeAudioData(bytes.slice(0));
+              return {
+                ok: true,
+                frames: decoded.length,
+                channels: decoded.numberOfChannels,
+                sampleRate: decoded.sampleRate,
+                contextSampleRate: context.sampleRate,
+                contextState: context.state || 'offline',
+              };
+            } catch (error) {
+              return { ok: false, name: error?.name || '', error: error?.message || String(error) };
+            } finally {
+              if (kind === 'realtime' && context?.close) {
+                try { await context.close(); } catch (_) {}
+              }
+            }
           }
-          done({ ok: true, value: { a: await decode('#audio-a'), b: await decode('#audio-b') } });
+          async function media(selector) {
+            const input = document.querySelector(selector);
+            if (!input?.files?.[0]) return { ok: false, error: `missing file for ${selector}` };
+            const url = URL.createObjectURL(input.files[0]);
+            try {
+              const audio = document.createElement('audio');
+              audio.preload = 'metadata';
+              const result = await new Promise(resolve => {
+                const timer = setTimeout(() => resolve({ ok: false, error: 'metadata timeout' }), 30000);
+                audio.addEventListener('loadedmetadata', () => {
+                  clearTimeout(timer);
+                  resolve({ ok: true, duration: audio.duration, readyState: audio.readyState });
+                }, { once: true });
+                audio.addEventListener('error', () => {
+                  clearTimeout(timer);
+                  resolve({ ok: false, mediaError: audio.error?.code || 0, error: audio.error?.message || 'media error' });
+                }, { once: true });
+                audio.src = url;
+              });
+              return result;
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          }
+          done({
+            ok: true,
+            value: {
+              a: {
+                offline: await decode('#audio-a', 'offline'),
+                realtime: await decode('#audio-a', 'realtime'),
+                media: await media('#audio-a'),
+              },
+              b: {
+                offline: await decode('#audio-b', 'offline'),
+                realtime: await decode('#audio-b', 'realtime'),
+                media: await media('#audio-b'),
+              },
+              canPlayHeAac: document.createElement('audio').canPlayType('audio/mp4; codecs="mp4a.40.5"'),
+            },
+          });
         })().catch(error => done({ ok: false, error: error?.stack || error?.message || String(error) }));
         """,
     )
@@ -173,10 +230,27 @@ def run_mode(driver: webdriver.Safari, mode: str, expected_frames: int) -> dict:
     return state
 
 
+def actual_app_decode_state(driver: webdriver.Safari) -> dict:
+    Select(driver.find_element(By.ID, "beat-pan")).select_by_value("")
+    checkbox = driver.find_element(By.ID, "append-reverse")
+    if checkbox.is_selected():
+        checkbox.click()
+    driver.find_element(By.ID, "run").click()
+    WebDriverWait(driver, 60).until(
+        lambda current: current.find_element(By.ID, "status").get_attribute("data-state") in {"done", "error"}
+    )
+    status = driver.find_element(By.ID, "status")
+    return {
+        "state": status.get_attribute("data-state"),
+        "text": status.text,
+        "pageErrors": driver.execute_script("return window.__releaseErrors || []"),
+    }
+
+
 def main() -> None:
     options = webdriver.SafariOptions()
     driver = webdriver.Safari(options=options)
-    driver.set_script_timeout(60)
+    driver.set_script_timeout(120)
     try:
         driver.get(BASE_URL)
         driver.execute_script(
@@ -188,9 +262,21 @@ def main() -> None:
         )
         driver.find_element(By.ID, "audio-a").send_keys(str(FIXTURE_DIR / "fixture.m4a"))
         driver.find_element(By.ID, "audio-b").send_keys(str(FIXTURE_DIR / "impulse.wav"))
-        decoded_result = decode_shapes(driver)
-        require(decoded_result.get("ok"), f"Safari decode failed: {decoded_result.get('error')}")
-        decoded = decoded_result["value"]
+        diagnostic_result = decode_diagnostics(driver)
+        require(diagnostic_result.get("ok"), f"Safari diagnostics failed: {diagnostic_result.get('error')}")
+        diagnostics = diagnostic_result["value"]
+        (CAPTURE_DIR / "safari-decode-diagnostics.json").write_text(json.dumps(diagnostics, indent=2))
+        print(json.dumps(diagnostics, indent=2))
+
+        if not diagnostics["a"]["offline"]["ok"] or not diagnostics["b"]["offline"]["ok"]:
+            app_state = actual_app_decode_state(driver)
+            (CAPTURE_DIR / "safari-app-decode-state.json").write_text(json.dumps(app_state, indent=2))
+            raise RuntimeError(f"Safari OfflineAudioContext incompatibility; actual app state: {app_state}")
+
+        decoded = {
+            "a": diagnostics["a"]["offline"],
+            "b": diagnostics["b"]["offline"],
+        }
         require(decoded["a"]["sampleRate"] == 48_000 and decoded["a"]["channels"] == 2, f"Safari HE-AAC shape mismatch {decoded['a']}")
         require(decoded["b"]["sampleRate"] == 48_000 and decoded["b"]["channels"] == 1, f"Safari impulse shape mismatch {decoded['b']}")
         forward_frames = decoded["a"]["frames"] + decoded["b"]["frames"] - 1
@@ -202,6 +288,7 @@ def main() -> None:
             "platformName": driver.capabilities.get("platformName"),
             "os": f"macOS {platform.mac_ver()[0]}",
             "decoded": decoded,
+            "diagnostics": diagnostics,
             "forwardFrames": forward_frames,
             "plain": plain,
             "reverse": reverse,
