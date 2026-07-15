@@ -91,7 +91,10 @@ jobs:
           FIXTURE_DIR: release-browser-fixture
           CAPTURE_DIR: release-browser-results/windows
           BASE_URL: http://127.0.0.1:4173
-        run: node tests/release-browser/windows_matrix.cjs
+        run: |
+          node tests/release-browser/windows_matrix.cjs 2>&1 \
+            | Tee-Object -FilePath release-browser-results/windows/harness.log
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -128,11 +131,25 @@ jobs:
       - name: Configure Safari WebDriver
         shell: bash
         run: |
-          set -euxo pipefail
-          python3 -m pip install --user selenium
-          sudo /usr/bin/safaridriver --enable
-          /usr/bin/safaridriver --version
-          sw_vers
+          mkdir -p release-browser-results/macos
+          set +e
+          {
+            set -x
+            python3 -m pip install --user selenium
+            pip_status=$?
+            sudo /usr/bin/safaridriver --enable
+            driver_status=$?
+            /usr/bin/safaridriver --version
+            sw_vers
+            echo "pip_status=$pip_status"
+            echo "driver_status=$driver_status"
+            test "$pip_status" -eq 0
+            test "$driver_status" -eq 0
+          } > release-browser-results/macos/safari-config.log 2>&1
+          status=$?
+          set -e
+          cat release-browser-results/macos/safari-config.log
+          exit "$status"
       - name: Start capture server
         shell: bash
         run: |
@@ -157,8 +174,13 @@ jobs:
           CAPTURE_DIR: release-browser-results/macos
           BASE_URL: http://127.0.0.1:4173
         run: |
-          set -euxo pipefail
-          python3 tests/release-browser/safari_matrix.py
+          set +e
+          python3 tests/release-browser/safari_matrix.py \
+            > release-browser-results/macos/harness.log 2>&1
+          status=$?
+          set -e
+          cat release-browser-results/macos/harness.log
+          exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
