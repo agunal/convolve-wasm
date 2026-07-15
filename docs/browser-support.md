@@ -10,7 +10,7 @@ The release target is current desktop Chrome/Edge and Safari.
 - A decode failure returns `DECODE_FAILED`; there is no upload, server fallback, or bundled FFmpeg decoder.
 - Processing is single-threaded WASM in a dedicated worker and does not require `SharedArrayBuffer`, COOP, or COEP headers.
 
-The real-world input that shaped the decoder decision was identified during planning as stereo, 48 kHz HE-AAC in an M4A container. A pure Rust AAC-LC-only decoder would not reliably cover that profile, so v1 uses the native browser media stack.
+The real-world input that shaped the decoder decision was identified during planning as stereo, 48 kHz HE-AAC in an M4A container. A pure Rust AAC-LC-only decoder would not reliably cover that profile, so v0.1.0 uses the native browser media stack.
 
 ## Automated WAV validation
 
@@ -39,7 +39,7 @@ The authoritative pre-merge integration run for PR #1 was GitHub Actions run `29
 
 That run also passed Rust formatting, linting and tests, the WASM build, TypeScript/package tests, the library and demo build, package inspection, and the `@ffmpeg/core` absence check.
 
-GitHub CI validates the portable WAV path in Chromium and WebKit. It does not prove native HE-AAC availability in desktop Chrome, Edge, or Safari because M4A decoding depends on each browser and operating system's codec stack.
+GitHub CI validates the portable WAV path in Chromium and WebKit. It does not by itself prove native HE-AAC availability in branded desktop Chrome, Edge, or Safari because M4A decoding depends on each browser and operating system's codec stack.
 
 ## Private HE-AAC fixture preflight
 
@@ -47,30 +47,24 @@ The exact private HE-AAC fixture and supplied WAV were preflighted on 2026-07-15
 
 See [the complete private-fixture preflight record](testing/2026-07-15-private-fixture-preflight.md) for input hashes, codec metadata, decoded frame counts, beat-grid results, output formulas, peak data and limitations.
 
-This evidence does not complete a release-browser row: the supplied WAV is program audio rather than an impulse, the repository's worker/WASM application path was not executed in that preflight, and Linux Chromium is not current desktop Google Chrome, Edge or Safari.
+That preflight did not complete a release-browser row because the supplied WAV was program audio rather than an impulse, the repository's worker/WASM application path was not executed, and Linux Chromium was not current branded Chrome, Edge, or Safari.
 
-## Manual HE-AAC release matrix
+## Hosted real-browser HE-AAC release matrix
 
-No private HE-AAC fixture is committed. Every row below remains a release blocker until the exact browser, operating system, codec profile, inspection tool, and results are recorded.
+The release-browser matrix was completed on 2026-07-15 using the unchanged production build of the repository demo/package/worker/WASM path and a deterministic stereo 48 kHz HE-AAC M4A plus a WAV impulse. See [the complete hosted-browser evidence record](testing/2026-07-15-hosted-release-browser-matrix.md).
+
+The M4A was produced by Apple `afconvert` with `-f m4af -d aach` and inspected with Apple `afinfo`, which reported stereo 48 kHz `aach` in the format list. Every browser ran plain convolution and `beatPan: "a"` with reverse append, started playback, activated the download path, and produced finite non-silent unclipped stereo 48 kHz PCM24 output matching the browser-specific decoded-frame formulas. No page errors were recorded.
 
 | Browser | Browser version | OS/version | M4A codec/profile + inspection tool | Plain convolution | Beat pan + reverse | Playback/download | Metadata/formulas/peak | Status |
 |---|---|---|---|---:|---:|---:|---:|---|
-| Chrome | — | — | — | — | — | — | — | Not run |
-| Edge | — | — | — | — | — | — | — | Not run |
-| Safari | — | — | — | — | — | — | — | Not run |
+| Chrome | 149.0.7827.201 | Windows Server 2025 Datacenter, build 26100, x64 | HE-AAC; Apple `aach`; `afconvert` + `afinfo` | Pass | Pass | Pass | PCM24/48 kHz/stereo; 198,943 and 397,646 frames; finite/unclipped | Pass |
+| Edge | 149.0.4022.98 | Windows Server 2025 Datacenter, build 26100, x64 | HE-AAC; Apple `aach`; `afconvert` + `afinfo` | Pass | Pass | Pass | PCM24/48 kHz/stereo; 198,943 and 397,646 frames; finite/unclipped | Pass |
+| Safari | 26.4 (21624.1.16.11.4) | macOS 26.4, build 25E246, Apple Silicon | HE-AAC; Apple `aach`; `afconvert` + `afinfo` | Pass | Pass | Pass | PCM24/48 kHz/stereo; 194,399 and 388,558 frames; finite/unclipped | Pass |
 
-For each browser:
+Chrome and Edge decoded 196,544 HE-AAC frames; Safari decoded 192,000. That difference reflects browser-specific codec delay and priming handling. Each output matched the documented formulas using the actual frames returned by that browser's decoder.
 
-1. Select a known stereo 48 kHz HE-AAC `.m4a` as A and a WAV impulse as B.
-2. Identify the exact AAC profile or object type with a named inspection tool and record both in the table; do not infer the profile from the filename or extension.
-3. Process without beat pan or reverse.
-4. Process with `beatPan: "a"` and reverse append.
-5. Play and download both WAV outputs.
-6. Confirm 48 kHz stereo PCM24 metadata, expected frame formulas, finite non-silent peak metadata, and no clipping or page errors.
-7. Record the exact browser version, operating-system version, codec/profile, inspection tool, and pass/fail in the table.
-
-A successful Playwright WebKit run on Linux does not substitute for the Safari row: it validates the browser application path, not Safari's desktop media-decoding stack.
+The Safari test used system Safari through the included `safaridriver`. Safari's automation sandbox made operating-system-injected file handles unreadable, including a WAV file. The same fixture bytes were therefore fetched from the demo origin and wrapped in browser-native `File` objects before assignment to the unchanged file inputs. Safari then passed its offline and realtime Web Audio decode checks, media-element metadata check, application worker/WASM processing, Blob playback, and download-byte validation.
 
 ## Why there is no bundled FFmpeg core
 
-The prebuilt `@ffmpeg/core` package is deliberately absent from the dependency tree. Adding it would introduce a materially different licensing and bundle-size boundary for an otherwise MIT-only v1. A future deterministic M4A backend should be an optional custom audio-only build, have an explicit separate entry point, and receive legal review before distribution.
+The prebuilt `@ffmpeg/core` package is deliberately absent from the dependency tree. Adding it would introduce a materially different licensing and bundle-size boundary for an otherwise MIT-only v0.1.0. A future deterministic M4A backend should be an optional custom audio-only build, have an explicit separate entry point, and receive legal review before distribution.
