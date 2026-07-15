@@ -25,12 +25,17 @@ The owner authorized preparation of these release choices:
 | Support metadata | GitHub issues and repository README |
 | Package-level Node engines | Omit because the published runtime target is browsers |
 | Canonical logo | `docs/assets/convolve-wasm-logo.png`, also copied to `apps/demo/public/convolve-wasm-logo.png` for the demo favicon and hero |
+| Logo surfaces | Root README, npm package README, v0.1.0 release notes, demo hero, and demo favicon |
 | Tag name | `v0.1.0` |
 | Release notes | `docs/releases/v0.1.0.md` |
 | Generated WASM | Remains ignored in the source tree; only built distribution assets are packed |
 | FFmpeg boundary | `@ffmpeg/core` remains absent |
 
 These choices authorize preparation and review only. They do not authorize merge, tag creation, GitHub release creation, registry changes, or publication.
+
+## Current branch verification
+
+GitHub Actions run `29387467373` completed successfully for head `758c55c7440ead550784d6e8cf60f4ffd80d0633` after the logo integration. It passed Rust formatting, Clippy and tests, the WASM build and Chrome smoke tests, TypeScript/package-consumer tests, library and demo builds, Chromium and WebKit E2E, package inspection, and the `@ffmpeg/core` absence gate.
 
 ## Hard blockers before merge
 
