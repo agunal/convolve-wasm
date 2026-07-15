@@ -72,6 +72,14 @@ jobs:
       - name: Test GitHub Pages subpath in Chromium
         run: npm run test:pages
 
+      - name: Upload GitHub Pages smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-smoke-diagnostics
+          path: test-results
+          if-no-files-found: warn
+
       - name: Inspect package contents
         run: npm pack -w @agunal/convolve-wasm --dry-run
 
