@@ -35,7 +35,7 @@ These choices authorize preparation and review only. They do not authorize merge
 
 ## Current branch verification
 
-GitHub Actions run `29387467373` completed successfully for head `758c55c7440ead550784d6e8cf60f4ffd80d0633` after the logo integration. It passed Rust formatting, Clippy and tests, the WASM build and Chrome smoke tests, TypeScript/package-consumer tests, library and demo builds, Chromium and WebKit E2E, package inspection, and the `@ffmpeg/core` absence gate.
+GitHub Actions run `29387616683` completed successfully for head `48ccd2e5f0412a9975fbf1b88582b1291eb9a408`. It passed Rust formatting, Clippy and tests, the WASM build and Chrome smoke tests, TypeScript/package-consumer tests, library and demo builds, Chromium and WebKit E2E, package inspection, and the `@ffmpeg/core` absence gate.
 
 ## Hard blockers before merge
 
