@@ -8,6 +8,9 @@
       "dist/**",
       "README.md",
       "LICENSE"
+    ],
+    "exclude": [
+      "!dist"
     ]
   }
 }
