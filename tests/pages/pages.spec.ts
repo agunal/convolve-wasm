@@ -7,11 +7,11 @@ interface BrowserFailures {
   consoleErrors: string[];
 }
 
-const expectedResourceUrls = [
+const expectedFooterUrls = [
   "https://github.com/agunal/convolve-wasm",
   "https://github.com/agunal/convolve-wasm/blob/main/packages/convolve-wasm/README.md",
   "https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md",
-  "https://github.com/agunal/convolve-wasm/blob/main/docs/releases/v0.1.0.md",
+  "https://github.com/agunal/convolve-wasm/issues",
 ];
 
 function watchFailures(page: Page): BrowserFailures {
@@ -47,13 +47,38 @@ test(
       await expect(page.locator("#audio-b")).toBeVisible();
       await expect(page.locator("#run")).toBeVisible();
       await expect(page.locator("#about")).toBeVisible();
-      await expect(page.locator(".site-footer")).toContainText("never uploaded");
+      await expect(page.locator("#about .resource-links")).toHaveCount(0);
 
-      const resourceLinks = page.locator("#about .resource-links a");
-      await expect(resourceLinks).toHaveCount(expectedResourceUrls.length);
+      const footer = page.locator(".site-footer");
+      await expect(footer).toContainText("never uploaded");
+      await expect(footer).toContainText(
+        "No uploads · No analytics · No server processing",
+      );
+      await expect(footer).toContainText("MIT licensed · Rust + WebAssembly");
+
+      const footerLinks = page.locator(".site-footer .footer-links a");
+      await expect(footerLinks).toHaveCount(expectedFooterUrls.length);
       await expect
-        .poll(() => resourceLinks.evaluateAll((links) => links.map((link) => link.href)))
-        .toEqual(expectedResourceUrls);
+        .poll(() => footerLinks.evaluateAll((links) => links.map((link) => link.href)))
+        .toEqual(expectedFooterUrls);
+      for (let index = 0; index < expectedFooterUrls.length; index += 1) {
+        await expect(footerLinks.nth(index)).toHaveAttribute("target", "_blank");
+        await expect(footerLinks.nth(index)).toHaveAttribute("rel", "noreferrer");
+      }
+
+      const ownerName = page.locator(".owner-name");
+      await expect(ownerName).toHaveText("@takana.gg");
+      expect(await ownerName.evaluate((element) => element.tagName)).toBe("SPAN");
+
+      const bluesky = page.getByRole("link", {
+        name: "@takana.gg on Bluesky",
+      });
+      await expect(bluesky).toHaveAttribute(
+        "href",
+        "https://bsky.app/profile/takana.gg",
+      );
+      await expect(bluesky).toHaveAttribute("target", "_blank");
+      await expect(bluesky).toHaveAttribute("rel", "noreferrer");
 
       await page.locator("#audio-a").setInputFiles({
         name: "a.wav",
