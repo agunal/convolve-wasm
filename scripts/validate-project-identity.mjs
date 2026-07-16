@@ -72,6 +72,11 @@ for (const requiredEntry of ["dist/**", "README.md", "LICENSE"]) {
   }
 }
 
+const publishExclude = jsrManifest.publish?.exclude;
+if (!Array.isArray(publishExclude) || !publishExclude.includes("!dist")) {
+  failures.push("JSR publish.exclude must unignore dist with !dist");
+}
+
 if (fs.existsSync(path.join(root, ".github/workflows/publish.yml"))) {
   failures.push("legacy npm workflow .github/workflows/publish.yml must be removed");
 }
