@@ -1,0 +1,530 @@
+name: Apply Takana Labs migration
+
+on:
+  push:
+    branches:
+      - chore/takana-labs-jsr-migration
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out migration branch
+        uses: actions/checkout@v4
+        with:
+          ref: chore/takana-labs-jsr-migration
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+
+      - name: Apply canonical identity changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+
+          const skip = new Set([
+            'scripts/validate-project-identity.mjs',
+            '.github/workflows/apply-takana-labs-migration.yml',
+          ]);
+          const replacements = [
+            ['@agunal/convolve-wasm', '@takana-labs/convolve-wasm'],
+            ['@agunal/convolve-demo', '@takana-labs/convolve-demo'],
+            ['https://raw.githubusercontent.com/agunal/convolve-wasm', 'https://raw.githubusercontent.com/takana-labs/convolve-wasm'],
+            ['https://github.com/agunal/convolve-wasm', 'https://github.com/takana-labs/convolve-wasm'],
+            ['https://agunal.github.io/convolve-wasm/', 'https://convolve-wasm.app/'],
+            ['agunal.github.io/convolve-wasm', 'convolve-wasm.app'],
+          ];
+
+          const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
+            .split('\0')
+            .filter(Boolean);
+
+          for (const file of files) {
+            if (skip.has(file) || file.startsWith('docs/superpowers/')) continue;
+            const buffer = fs.readFileSync(file);
+            if (buffer.includes(0)) continue;
+            let content = buffer.toString('utf8');
+            let next = content;
+            for (const [from, to] of replacements) next = next.replaceAll(from, to);
+            if (next !== content) fs.writeFileSync(file, next);
+          }
+
+          const root = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          root.scripts['validate:jsr'] = 'cd packages/convolve-wasm && npx --yes jsr@0.14.3 publish --dry-run';
+          root.scripts.check = root.scripts.check.includes('validate:jsr')
+            ? root.scripts.check
+            : `${root.scripts.check} && npm run validate:jsr`;
+          fs.writeFileSync('package.json', `${JSON.stringify(root, null, 2)}\n`);
+
+          const manifestPath = 'packages/convolve-wasm/package.json';
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          manifest.name = '@takana-labs/convolve-wasm';
+          manifest.repository = {
+            type: 'git',
+            url: 'git+https://github.com/takana-labs/convolve-wasm.git',
+            directory: 'packages/convolve-wasm',
+          };
+          manifest.bugs = { url: 'https://github.com/takana-labs/convolve-wasm/issues' };
+          manifest.homepage = 'https://convolve-wasm.app/';
+          delete manifest.publishConfig;
+          fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+          const demoPath = 'apps/demo/package.json';
+          const demo = JSON.parse(fs.readFileSync(demoPath, 'utf8'));
+          demo.name = '@takana-labs/convolve-demo';
+          demo.dependencies = { '@takana-labs/convolve-wasm': '0.1.0' };
+          fs.writeFileSync(demoPath, `${JSON.stringify(demo, null, 2)}\n`);
+
+          let readme = fs.readFileSync('README.md', 'utf8');
+          readme = readme.replace(
+            'The hosted application runs the same browser-local pipeline without requiring installation. npm installation remains available for applications that want to call the public API directly.',
+            'The hosted application runs the same browser-local pipeline without requiring installation. Applications can add the public API from JSR with `npx jsr add @takana-labs/convolve-wasm`.',
+          );
+          if (!readme.includes('## Install from JSR')) {
+            readme = readme.replace(
+              '## Public API',
+              '## Install from JSR\n\n```bash\nnpx jsr add @takana-labs/convolve-wasm\n```\n\n## Public API',
+            );
+          }
+          fs.writeFileSync('README.md', readme);
+
+          const ciPath = '.github/workflows/ci.yml';
+          let ci = fs.readFileSync(ciPath, 'utf8');
+          const buildStep = '      - name: Build library and demo\n        run: npm run build\n';
+          if (!ci.includes('Validate JSR package')) {
+            ci = ci.replace(
+              buildStep,
+              `${buildStep}\n      - name: Validate JSR package\n        run: npm run validate:jsr\n`,
+            );
+          }
+          fs.writeFileSync(ciPath, ci);
+          NODE
+
+          cat > packages/convolve-wasm/jsr.json <<'JSON'
+          {
+            "$schema": "https://jsr.io/schema/config-file.v1.json",
+            "name": "@takana-labs/convolve-wasm",
+            "version": "0.1.0",
+            "exports": "./dist/index.js",
+            "publish": {
+              "include": [
+                "dist/**",
+                "README.md",
+                "LICENSE"
+              ]
+            }
+          }
+          JSON
+
+          cp LICENSE packages/convolve-wasm/LICENSE
+
+          cat > packages/convolve-wasm/README.md <<'MARKDOWN'
+          <p align="center">
+            <img src="https://raw.githubusercontent.com/takana-labs/convolve-wasm/main/docs/assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
+          </p>
+
+          # @takana-labs/convolve-wasm
+
+          Browser-side stereo audio convolution backed by a Rust/WebAssembly DSP core and a dedicated module worker.
+
+          ## Install from JSR
+
+          ```bash
+          npx jsr add @takana-labs/convolve-wasm
+          ```
+
+          ```ts
+          import { CONVOLVE } from "@takana-labs/convolve-wasm";
+
+          const result = await CONVOLVE({ a: fileA, b: fileB });
+          const url = URL.createObjectURL(result.wav);
+          ```
+
+          The package includes its worker and WebAssembly assets. Consumers should import only from the package root; no CDN, upload service, or server-side audio processing is required.
+          MARKDOWN
+
+          cat > docs/release-readiness.md <<'MARKDOWN'
+          # v0.1.0 final release readiness
+
+          **Status:** Migration candidate only. Do not merge before the repository is transferred to `takana-labs/convolve-wasm` and the GitHub app is authorized for the organization. Do not tag, create a GitHub Release, or publish until exact-artifact authorization is given.
+
+          ## Approved identity
+
+          | Surface | v0.1.0 value |
+          |---|---|
+          | Repository | `takana-labs/convolve-wasm` |
+          | JSR package | `@takana-labs/convolve-wasm@0.1.0` |
+          | Canonical site | `https://convolve-wasm.app/` |
+          | Registry authentication | GitHub Actions OIDC; no registry token |
+          | Release tag | `v0.1.0` |
+          | Generated WASM | Ignored in source; included only in built `dist` |
+          | FFmpeg boundary | `@ffmpeg/core` remains absent |
+
+          ## External owner actions before publication
+
+          1. Transfer the repository without renaming it.
+          2. Authorize the GitHub app and confirm organization Actions/Pages policy.
+          3. Verify and configure `convolve-wasm.app` for GitHub Pages.
+          4. Link the reserved JSR package to `takana-labs/convolve-wasm`.
+          5. Create a protected GitHub environment named `jsr` with the desired reviewer policy.
+
+          ## Candidate workflow
+
+          **Build JSR Release Candidate** accepts the exact current `main` SHA, runs the complete Rust/WASM/TypeScript/Chromium/WebKit/Pages matrix, validates the manual browser table, performs a JSR dry run, stages the exact package directory, and uploads a checksum-protected `jsr-release-candidate` artifact.
+
+          ## Publication workflow
+
+          **Publish Inspected JSR Artifact** requires the exact tagged source SHA, successful candidate run ID, approved tarball SHA-256, and acknowledgement `PUBLISH @takana-labs/convolve-wasm@0.1.0 TO JSR`. It verifies the downloaded artifact and publishes that artifact through JSR OIDC without rebuilding.
+
+          ## Required sequence
+
+          1. Merge only after explicit authorization and green post-transfer CI.
+          2. Run **Build JSR Release Candidate** on the exact resulting `main` SHA.
+          3. Download and inspect the candidate archive, contents list, dry-run output, metadata, and SHA-256.
+          4. Obtain explicit authorization naming the exact SHA, run ID, filename, and hash.
+          5. Create `v0.1.0` on that exact SHA.
+          6. Run **Publish Inspected JSR Artifact** with the approved values.
+          7. Verify the immutable JSR version and clean consumer installation.
+          8. Create a GitHub Release only after separate authorization.
+
+          Any mismatch in source commit, tag, workflow run, artifact hash, manifest, package contents, browser matrix, or acknowledgement voids the authorization and stops publication.
+          MARKDOWN
+
+          cat > docs/releases/v0.1.0.md <<'MARKDOWN'
+          <p align="center">
+            <img src="../assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
+          </p>
+
+          # @takana-labs/convolve-wasm v0.1.0
+
+          **Status:** Draft release notes. Do not publish, tag, or create a GitHub Release until the repository transfer, final merged-commit verification, exact JSR artifact approval, and OIDC controls are complete.
+
+          ## Overview
+
+          `@takana-labs/convolve-wasm` is a browser-side stereo audio convolution library backed by a Rust/WebAssembly DSP core and a dedicated module worker. Source audio and rendered output remain on the client.
+
+          ## Install
+
+          ```bash
+          npx jsr add @takana-labs/convolve-wasm
+          ```
+
+          ## Highlights
+
+          - Public `CONVOLVE()` API for `.wav` and browser-decodable `.m4a` inputs.
+          - Full wet-only stereo linear convolution at 48 kHz.
+          - Optional beat detection, equal-power alternating panning, and exact reverse append.
+          - Attenuation-only estimated true-peak normalization.
+          - Stereo 48 kHz signed 24-bit PCM WAV output.
+          - Dedicated module worker with transferable buffers and progress events.
+          - Exact 256 MiB conservative WASM allocation guard.
+          - Stable public error codes and no bundled `@ffmpeg/core` dependency.
+
+          ## Public API
+
+          ```ts
+          import { CONVOLVE } from "@takana-labs/convolve-wasm";
+
+          const result = await CONVOLVE(
+            { a: fileA, b: fileB },
+            true,
+            { beatPan: "a", panTransitionMs: 20, reverseCrossfadeMs: 5, targetDbtp: -1 },
+          );
+          ```
+
+          ## Browser and codec boundary
+
+          WAV is the automated portability baseline. M4A decoding uses the browser and operating-system media stack through `decodeAudioData()` and may return `DECODE_FAILED` when the required codec is unavailable. See [browser and codec support](../browser-support.md) for the verified matrix.
+
+          ## Release verification
+
+          The release must come from the exact approved `main` commit and the inspected `jsr-release-candidate` archive. The JSR publish workflow uses GitHub OIDC, does not rebuild the artifact, and requires a separately approved SHA-256.
+
+          ## License
+
+          MIT.
+          MARKDOWN
+
+          rm .github/workflows/publish.yml
+
+          cat > .github/workflows/release-candidate.yml <<'YAML'
+          name: Build JSR Release Candidate
+
+          on:
+            workflow_dispatch:
+              inputs:
+                source_commit:
+                  description: Exact merged commit to verify and package
+                  required: true
+                  type: string
+
+          permissions:
+            contents: read
+
+          jobs:
+            verify-and-package:
+              runs-on: ubuntu-latest
+              timeout-minutes: 60
+
+              steps:
+                - name: Check out exact source commit
+                  uses: actions/checkout@v6
+                  with:
+                    ref: ${{ inputs.source_commit }}
+                    fetch-depth: 0
+
+                - name: Verify exact current main commit
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    [[ "${{ inputs.source_commit }}" =~ ^[0-9a-f]{40}$ ]]
+                    actual=$(git rev-parse HEAD)
+                    test "$actual" = "${{ inputs.source_commit }}"
+                    git fetch --force origin refs/heads/main:refs/remotes/origin/main
+                    test "$actual" = "$(git rev-parse origin/main)"
+                    test -z "$(git status --porcelain)"
+
+                - name: Set up Node.js
+                  uses: actions/setup-node@v6
+                  with:
+                    node-version: '24'
+                    package-manager-cache: false
+
+                - name: Set up Rust
+                  uses: dtolnay/rust-toolchain@stable
+                  with:
+                    targets: wasm32-unknown-unknown
+                    components: rustfmt, clippy
+
+                - name: Install wasm-pack
+                  run: cargo install wasm-pack --version 0.14.0 --locked
+
+                - name: Install JavaScript dependencies
+                  run: npm ci
+
+                - name: Validate identity, documentation, and links
+                  run: npm run validate:identity && npm run validate:docs && npm run validate:links
+
+                - name: Verify manual browser matrix is complete
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    for browser in Chrome Edge Safari; do
+                      mapfile -t rows < <(grep -E "^\\| $browser \\|" docs/browser-support.md)
+                      test "${#rows[@]}" -eq 1
+                      row="${rows[0]}"
+                      ! grep -q '—' <<<"$row"
+                      grep -Eq '\| Pass \|$' <<<"$row"
+                    done
+
+                - name: Run Rust checks
+                  run: cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+
+                - name: Build and test package
+                  run: npm run build:wasm && npm run test:ts && npm run build
+
+                - name: Build and validate Pages artifact
+                  run: npm run build:pages && npm run validate:pages
+
+                - name: Install Playwright browsers
+                  run: npx playwright install --with-deps chromium webkit
+
+                - name: Run browser matrix
+                  run: wasm-pack test --headless --chrome crates/convolve-core && npm run test:e2e && npm run test:pages
+
+                - name: Stage and inspect exact JSR artifact
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    artifact_dir="$RUNNER_TEMP/jsr-release-candidate"
+                    package_dir="$artifact_dir/package"
+                    mkdir -p "$package_dir"
+                    cp packages/convolve-wasm/jsr.json "$package_dir/"
+                    cp packages/convolve-wasm/package.json "$package_dir/"
+                    cp packages/convolve-wasm/README.md "$package_dir/"
+                    cp packages/convolve-wasm/LICENSE "$package_dir/"
+                    cp -R packages/convolve-wasm/dist "$package_dir/"
+
+                    (cd "$package_dir" && npx --yes jsr@0.14.3 publish --dry-run) | tee "$artifact_dir/JSR-DRY-RUN.txt"
+                    find "$package_dir" -type f -printf '%P\n' | LC_ALL=C sort | tee "$artifact_dir/CONTENTS.txt"
+
+                    if grep -R -n -F '@ffmpeg/core' "$package_dir"; then
+                      echo '@ffmpeg/core found in candidate artifact' >&2
+                      exit 1
+                    fi
+
+                    tar -C "$artifact_dir" -czf "$artifact_dir/convolve-wasm-jsr-0.1.0.tgz" package
+                    (cd "$artifact_dir" && sha256sum convolve-wasm-jsr-0.1.0.tgz | tee SHA256SUMS)
+                    printf 'source_commit=%s\n' "$(git rev-parse HEAD)" > "$artifact_dir/RELEASE-METADATA.txt"
+                    printf 'package=@takana-labs/convolve-wasm@0.1.0\n' >> "$artifact_dir/RELEASE-METADATA.txt"
+                    test -z "$(git status --porcelain)"
+
+                - name: Upload inspected JSR release candidate
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: jsr-release-candidate
+                    path: |
+                      ${{ runner.temp }}/jsr-release-candidate/convolve-wasm-jsr-0.1.0.tgz
+                      ${{ runner.temp }}/jsr-release-candidate/SHA256SUMS
+                      ${{ runner.temp }}/jsr-release-candidate/CONTENTS.txt
+                      ${{ runner.temp }}/jsr-release-candidate/JSR-DRY-RUN.txt
+                      ${{ runner.temp }}/jsr-release-candidate/RELEASE-METADATA.txt
+                    if-no-files-found: error
+                    retention-days: 30
+          YAML
+
+          cat > .github/workflows/publish-jsr.yml <<'YAML'
+          name: Publish Inspected JSR Artifact
+
+          on:
+            workflow_dispatch:
+              inputs:
+                source_commit:
+                  description: Exact tagged source commit
+                  required: true
+                  type: string
+                artifact_run_id:
+                  description: Successful Build JSR Release Candidate run ID
+                  required: true
+                  type: string
+                artifact_sha256:
+                  description: Approved lowercase SHA-256 of the inspected archive
+                  required: true
+                  type: string
+                publish_acknowledgement:
+                  description: Type PUBLISH @takana-labs/convolve-wasm@0.1.0 TO JSR
+                  required: true
+                  type: string
+
+          permissions:
+            actions: read
+            contents: read
+            id-token: write
+
+          jobs:
+            publish:
+              runs-on: ubuntu-latest
+              timeout-minutes: 15
+              environment: jsr
+
+              steps:
+                - name: Validate approval inputs
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    [[ "${{ inputs.source_commit }}" =~ ^[0-9a-f]{40}$ ]]
+                    [[ "${{ inputs.artifact_run_id }}" =~ ^[0-9]+$ ]]
+                    [[ "${{ inputs.artifact_sha256 }}" =~ ^[0-9a-f]{64}$ ]]
+                    test "${{ inputs.publish_acknowledgement }}" = 'PUBLISH @takana-labs/convolve-wasm@0.1.0 TO JSR'
+
+                - name: Check out exact source commit
+                  uses: actions/checkout@v6
+                  with:
+                    ref: ${{ inputs.source_commit }}
+                    fetch-depth: 0
+
+                - name: Verify source commit and release tag
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    actual=$(git rev-parse HEAD)
+                    test "$actual" = "${{ inputs.source_commit }}"
+                    git fetch --force origin refs/tags/v0.1.0:refs/tags/v0.1.0
+                    test "$(git rev-list -n 1 v0.1.0)" = "$actual"
+                    test -z "$(git status --porcelain)"
+
+                - name: Set up Node.js
+                  uses: actions/setup-node@v6
+                  with:
+                    node-version: '24'
+                    package-manager-cache: false
+
+                - name: Verify candidate workflow run
+                  shell: bash
+                  env:
+                    GH_TOKEN: ${{ github.token }}
+                    ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+                  run: |
+                    set -euo pipefail
+                    run_json=$(gh run view "$ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" --json name,conclusion,event)
+                    test "$(jq -r .name <<<"$run_json")" = 'Build JSR Release Candidate'
+                    test "$(jq -r .conclusion <<<"$run_json")" = 'success'
+                    test "$(jq -r .event <<<"$run_json")" = 'workflow_dispatch'
+
+                - name: Download inspected artifact
+                  shell: bash
+                  env:
+                    GH_TOKEN: ${{ github.token }}
+                    ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+                  run: |
+                    set -euo pipefail
+                    gh run download "$ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" --name jsr-release-candidate --dir release-artifact
+
+                - name: Verify artifact identity and contents
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    archive=release-artifact/convolve-wasm-jsr-0.1.0.tgz
+                    test -f "$archive"
+                    (cd release-artifact && sha256sum --check SHA256SUMS)
+                    test "$(sha256sum "$archive" | awk '{print $1}')" = "${{ inputs.artifact_sha256 }}"
+                    grep -Fx "source_commit=${{ inputs.source_commit }}" release-artifact/RELEASE-METADATA.txt
+                    rm -rf release-package
+                    mkdir release-package
+                    tar -xzf "$archive" -C release-package
+
+                    node <<'NODE'
+                    const fs = require('node:fs');
+                    const jsr = JSON.parse(fs.readFileSync('release-package/package/jsr.json', 'utf8'));
+                    const pkg = JSON.parse(fs.readFileSync('release-package/package/package.json', 'utf8'));
+                    const failures = [];
+                    if (jsr.name !== '@takana-labs/convolve-wasm') failures.push('unexpected JSR package name');
+                    if (jsr.version !== '0.1.0') failures.push('unexpected JSR package version');
+                    if (jsr.exports !== './dist/index.js') failures.push('unexpected JSR export');
+                    if (pkg.name !== '@takana-labs/convolve-wasm') failures.push('unexpected package name');
+                    if (pkg.repository?.url !== 'git+https://github.com/takana-labs/convolve-wasm.git') failures.push('repository mismatch');
+                    if (failures.length) throw new Error(failures.join('\n'));
+                    NODE
+
+                    if grep -R -n -F '@ffmpeg/core' release-package/package; then
+                      echo '@ffmpeg/core found in approved artifact' >&2
+                      exit 1
+                    fi
+
+                - name: Revalidate and publish approved package with JSR OIDC
+                  working-directory: release-package/package
+                  run: |
+                    set -euo pipefail
+                    npx --yes jsr@0.14.3 publish --dry-run
+                    npx --yes jsr@0.14.3 publish
+          YAML
+
+          npm install --package-lock-only --ignore-scripts
+          npm run validate:identity
+
+          rm -f .migration-preparation-marker
+          rm -f docs/superpowers/specs/2026-07-16-takana-labs-jsr-migration-checkpoint.md
+          rm -f docs/superpowers/plans/2026-07-16-takana-labs-jsr-migration-status.md
+          rm -f .github/workflows/apply-takana-labs-migration.yml
+
+      - name: Commit prepared migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'chore: prepare Takana Labs and JSR migration'
+          git push origin HEAD:chore/takana-labs-jsr-migration
