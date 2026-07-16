@@ -137,17 +137,16 @@ jobs:
           rm -f .github/workflows/apply-takana-labs-jsr-migration.yml
 
           git add -A
-          git diff --cached --binary > migration.patch
-          tar --exclude=.git --exclude=node_modules --exclude=migration.patch -czf migration-prepared.tar.gz .
-          sha256sum migration-prepared.tar.gz migration.patch > MIGRATION-SHA256SUMS
+          artifact_dir="$RUNNER_TEMP/takana-labs-migration-prepared"
+          mkdir -p "$artifact_dir"
+          git diff --cached --binary > "$artifact_dir/migration.patch"
+          tar --exclude=.git --exclude=node_modules -czf "$artifact_dir/migration-prepared.tar.gz" .
+          (cd "$artifact_dir" && sha256sum migration-prepared.tar.gz migration.patch > MIGRATION-SHA256SUMS)
 
       - name: Upload prepared migration
         uses: actions/upload-artifact@v4
         with:
           name: takana-labs-migration-prepared
-          path: |
-            migration-prepared.tar.gz
-            migration.patch
-            MIGRATION-SHA256SUMS
+          path: ${{ runner.temp }}/takana-labs-migration-prepared
           if-no-files-found: error
           retention-days: 7
