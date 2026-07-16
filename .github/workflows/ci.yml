@@ -72,11 +72,11 @@ jobs:
           set -o pipefail
           npm run validate:jsr 2>&1 | tee "$RUNNER_TEMP/jsr-dry-run.log"
 
-      - name: Upload JSR dry-run evidence
-        if: always()
+      - name: Upload JSR dry-run diagnostics
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: jsr-dry-run-evidence
+          name: jsr-dry-run-diagnostics
           path: ${{ runner.temp }}/jsr-dry-run.log
           if-no-files-found: warn
 
