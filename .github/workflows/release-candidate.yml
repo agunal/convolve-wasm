@@ -1,10 +1,10 @@
-name: Build Release Candidate
+name: Build JSR Release Candidate
 
 on:
   workflow_dispatch:
     inputs:
       source_commit:
-        description: Exact merged commit to verify and pack
+        description: Exact merged commit to verify and package
         required: true
         type: string
 
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  verify-and-pack:
+  verify-and-package:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -31,8 +31,7 @@ jobs:
           actual=$(git rev-parse HEAD)
           test "$actual" = "${{ inputs.source_commit }}"
           git fetch --force origin refs/heads/main:refs/remotes/origin/main
-          main_commit=$(git rev-parse origin/main)
-          test "$actual" = "$main_commit"
+          test "$actual" = "$(git rev-parse origin/main)"
           test -z "$(git status --porcelain)"
           printf 'Source commit: %s\n' "$actual"
 
@@ -41,9 +40,6 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
-
-      - name: Pin supported npm CLI
-        run: npm install --global npm@11.5.1
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -57,24 +53,8 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Verify release manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const manifest = require('./packages/convolve-wasm/package.json');
-          const failures = [];
-          if (manifest.name !== '@agunal/convolve-wasm') failures.push('unexpected package name');
-          if (manifest.version !== '0.1.0') failures.push('unexpected package version');
-          if (manifest.private === true) failures.push('package is still private');
-          if (manifest.publishConfig?.access !== 'public') failures.push('public access is not enforced');
-          if (manifest.publishConfig?.provenance !== true) failures.push('provenance is not enabled');
-          if (manifest.repository?.url !== 'git+https://github.com/agunal/convolve-wasm.git') failures.push('repository URL mismatch');
-          if (failures.length) {
-            console.error(failures.join('\n'));
-            process.exit(1);
-          }
-          NODE
+      - name: Validate identity, documentation, and links
+        run: npm run validate:identity && npm run validate:docs && npm run validate:links
 
       - name: Verify manual browser matrix is complete
         shell: bash
@@ -115,6 +95,12 @@ jobs:
       - name: Build library and demo
         run: npm run build
 
+      - name: Validate JSR package
+        run: npm run validate:jsr
+
+      - name: Build and validate Pages artifact
+        run: npm run build:pages && npm run validate:pages
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
@@ -124,57 +110,48 @@ jobs:
       - name: Test browser demo in Chromium and WebKit
         run: npm run test:e2e
 
-      - name: Pack and inspect exact artifact
+      - name: Test GitHub Pages subpath in Chromium
+        run: npm run test:pages
+
+      - name: Stage and inspect exact JSR artifact
         shell: bash
         run: |
           set -euo pipefail
-          artifact_dir="$RUNNER_TEMP/npm-release-candidate"
-          mkdir "$artifact_dir"
+          artifact_dir="$RUNNER_TEMP/jsr-release-candidate"
+          package_dir="$artifact_dir/package"
+          mkdir -p "$package_dir"
+          cp packages/convolve-wasm/jsr.json "$package_dir/"
+          cp packages/convolve-wasm/package.json "$package_dir/"
+          cp packages/convolve-wasm/README.md "$package_dir/"
+          cp packages/convolve-wasm/LICENSE "$package_dir/"
+          cp -R packages/convolve-wasm/dist "$package_dir/"
 
-          npm pack --json --pack-destination "$artifact_dir" -w @agunal/convolve-wasm \
-            > "$artifact_dir/pack.json"
+          (cd "$package_dir" && npx --yes jsr@0.14.3 publish --dry-run) \
+            | tee "$artifact_dir/JSR-DRY-RUN.txt"
+          find "$package_dir" -type f -printf '%P\n' \
+            | LC_ALL=C sort \
+            | tee "$artifact_dir/CONTENTS.txt"
 
-          mapfile -t tarballs < <(find "$artifact_dir" -maxdepth 1 -type f -name '*.tgz' -print)
-          test "${#tarballs[@]}" -eq 1
-          tarball="${tarballs[0]}"
-
-          tar -tzf "$tarball" | LC_ALL=C sort | tee "$artifact_dir/CONTENTS.txt"
-          (cd "$artifact_dir" && sha256sum "$(basename "$tarball")" | tee SHA256SUMS)
-
-          mkdir "$artifact_dir/unpacked"
-          tar -xzf "$tarball" -C "$artifact_dir/unpacked"
-
-          if grep -R -n -F '@ffmpeg/core' "$artifact_dir/unpacked/package"; then
-            echo '@ffmpeg/core found in packed artifact' >&2
+          if grep -R -n -F '@ffmpeg/core' "$package_dir"; then
+            echo '@ffmpeg/core found in candidate artifact' >&2
             exit 1
           fi
 
-          set +e
-          ffmpeg_tree=$(npm ls @ffmpeg/core 2>&1)
-          ffmpeg_status=$?
-          set -e
-          printf '%s\n' "$ffmpeg_tree"
-          if [ "$ffmpeg_status" -eq 0 ] || grep -q '@ffmpeg/core@' <<<"$ffmpeg_tree"; then
-            echo '@ffmpeg/core must be absent from the dependency tree' >&2
-            exit 1
-          fi
-
-          rm -rf "$artifact_dir/unpacked"
+          tar -C "$artifact_dir" -czf "$artifact_dir/convolve-wasm-jsr-0.1.0.tgz" package
+          (cd "$artifact_dir" && sha256sum convolve-wasm-jsr-0.1.0.tgz | tee SHA256SUMS)
           printf 'source_commit=%s\n' "$(git rev-parse HEAD)" > "$artifact_dir/RELEASE-METADATA.txt"
-          printf 'tarball=%s\n' "$(basename "$tarball")" >> "$artifact_dir/RELEASE-METADATA.txt"
-          cat "$artifact_dir/pack.json" >> "$artifact_dir/RELEASE-METADATA.txt"
-
+          printf 'package=@takana-labs/convolve-wasm@0.1.0\n' >> "$artifact_dir/RELEASE-METADATA.txt"
           test -z "$(git status --porcelain)"
 
-      - name: Upload inspected release candidate
+      - name: Upload inspected JSR release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: npm-release-candidate
+          name: jsr-release-candidate
           path: |
-            ${{ runner.temp }}/npm-release-candidate/*.tgz
-            ${{ runner.temp }}/npm-release-candidate/pack.json
-            ${{ runner.temp }}/npm-release-candidate/SHA256SUMS
-            ${{ runner.temp }}/npm-release-candidate/CONTENTS.txt
-            ${{ runner.temp }}/npm-release-candidate/RELEASE-METADATA.txt
+            ${{ runner.temp }}/jsr-release-candidate/convolve-wasm-jsr-0.1.0.tgz
+            ${{ runner.temp }}/jsr-release-candidate/SHA256SUMS
+            ${{ runner.temp }}/jsr-release-candidate/CONTENTS.txt
+            ${{ runner.temp }}/jsr-release-candidate/JSR-DRY-RUN.txt
+            ${{ runner.temp }}/jsr-release-candidate/RELEASE-METADATA.txt
           if-no-files-found: error
           retention-days: 30
