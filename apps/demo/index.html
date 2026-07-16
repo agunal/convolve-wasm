@@ -7,6 +7,21 @@
       name="description"
       content="Convolve two audio files locally in a Rust/WebAssembly worker."
     />
+    <meta name="theme-color" content="#0b0f12" />
+    <meta property="og:title" content="Convolve WASM" />
+    <meta
+      property="og:description"
+      content="Private browser-side stereo convolution powered by Rust and WebAssembly."
+    />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/agunal/convolve-wasm/main/docs/assets/convolve-wasm-logo.png"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:url"
+      content="https://agunal.github.io/convolve-wasm/"
+    />
     <link
       rel="icon"
       type="image/png"
@@ -17,19 +32,38 @@
   <body>
     <main class="shell">
       <header class="hero">
-        <img
-          class="brand-mark"
-          src="%BASE_URL%convolve-wasm-logo.png"
-          alt="convolve-wasm"
-          width="192"
-          height="192"
-        />
-        <p class="eyebrow">Local audio laboratory</p>
-        <h1>Convolve <span>WASM</span></h1>
-        <p class="lede">
-          Combine two WAV or browser-decodable M4A files without uploading
-          audio. Processing stays in this tab and runs in a dedicated worker.
-        </p>
+        <div class="hero-relief" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+
+        <div class="brand-plaque">
+          <div class="brand-plaque-inner">
+            <img
+              class="brand-mark"
+              src="%BASE_URL%convolve-wasm-logo.png"
+              alt="convolve-wasm"
+              width="192"
+              height="192"
+            />
+          </div>
+          <p class="plaque-caption">48 kHz · PCM24 · Stereo</p>
+        </div>
+
+        <div class="hero-copy">
+          <p class="eyebrow">Local audio laboratory</p>
+          <h1>Convolve <span>WASM</span></h1>
+          <p class="lede">
+            Combine two WAV or browser-decodable M4A files without uploading
+            audio. Processing stays in this tab and runs in a dedicated worker.
+          </p>
+          <div class="hero-specs" aria-label="Application properties">
+            <span>Browser local</span>
+            <span>Rust / WASM</span>
+            <span>Wet-only convolution</span>
+          </div>
+        </div>
       </header>
 
       <section class="panel" aria-labelledby="inputs-heading">
@@ -167,14 +201,32 @@
         </div>
 
         <nav class="resource-links" aria-label="Project resources">
-          <a href="https://github.com/agunal/convolve-wasm">GitHub repository</a>
-          <a href="https://github.com/agunal/convolve-wasm/tree/main/packages/convolve-wasm">
+          <a
+            href="https://github.com/agunal/convolve-wasm"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub repository
+          </a>
+          <a
+            href="https://github.com/agunal/convolve-wasm/blob/main/packages/convolve-wasm/README.md"
+            target="_blank"
+            rel="noreferrer"
+          >
             Package documentation
           </a>
-          <a href="https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md">
+          <a
+            href="https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md"
+            target="_blank"
+            rel="noreferrer"
+          >
             Browser support
           </a>
-          <a href="https://github.com/agunal/convolve-wasm/blob/main/docs/releases/v0.1.0.md">
+          <a
+            href="https://github.com/agunal/convolve-wasm/blob/main/docs/releases/v0.1.0.md"
+            target="_blank"
+            rel="noreferrer"
+          >
             v0.1.0 release notes
           </a>
         </nav>
