@@ -28,6 +28,7 @@ function columnCount(value: string): number {
 async function gridColumnCount(page: Page, selector: string): Promise<number> {
   const columns = await page
     .locator(selector)
+    .first()
     .evaluate((element) => getComputedStyle(element).gridTemplateColumns);
   return columnCount(columns);
 }
