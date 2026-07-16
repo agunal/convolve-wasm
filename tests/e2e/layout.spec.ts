@@ -64,8 +64,14 @@ test("desktop presents the embossed stone visual system", async ({ page }) => {
   expect(columnCount(theme.heroColumns)).toBe(2);
   await expect(page.locator(".brand-plaque")).toBeVisible();
   await expect(page.locator(".hero-relief")).toBeVisible();
+  await expect(page.locator(".icon-sprite")).toHaveCount(1);
+  await expect(page.locator("#run .ui-icon")).toHaveCount(1);
+  await expect(page.locator(".download .ui-icon")).toHaveCount(1);
+  await expect(page.locator(".control-label .ui-icon")).toHaveCount(4);
+  await expect(page.locator(".site-footer .ui-icon")).toHaveCount(5);
   await expectTouchTarget(page, "#run");
-  await expectTouchTarget(page, ".resource-links a");
+  await expectTouchTarget(page, ".footer-links a");
+  await expectTouchTarget(page, ".bluesky-link");
   await assertNoHorizontalOverflow(page);
 });
 
@@ -82,8 +88,11 @@ test("phone layout stays contained and stacks section headings", async ({
 
   expect(await gridColumnCount(page, ".hero")).toBe(1);
   expect(await gridColumnCount(page, ".section-heading")).toBe(1);
+  expect(await gridColumnCount(page, ".footer-grid")).toBe(1);
   await expectTouchTarget(page, "#run");
   await expectTouchTarget(page, "input[type=file]");
+  await expectTouchTarget(page, ".footer-links a");
+  await expectTouchTarget(page, ".bluesky-link");
 });
 
 test("tablet layout stacks dense controls and result actions", async ({
@@ -98,5 +107,5 @@ test("tablet layout stacks dense controls and result actions", async ({
     expect(await gridColumnCount(page, selector)).toBe(1);
   }
   await expectTouchTarget(page, ".download");
-  await expectTouchTarget(page, ".resource-links a");
+  await expectTouchTarget(page, ".footer-links a");
 });
