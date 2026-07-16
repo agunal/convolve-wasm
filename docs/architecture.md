@@ -2,7 +2,7 @@
 
 ## Boundary overview
 
-`@agunal/convolve-wasm` is an offline browser library with three execution layers.
+`@takana-labs/convolve-wasm` is an offline browser library with three execution layers.
 
 ### Browser control thread
 

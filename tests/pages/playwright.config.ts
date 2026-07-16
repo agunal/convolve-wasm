@@ -26,7 +26,7 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      "npm run preview -w @agunal/convolve-demo -- --host 127.0.0.1 --port 4173",
+      "npm run preview -w @takana-labs/convolve-demo -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173/convolve-wasm/",
     env: {
       ...process.env,

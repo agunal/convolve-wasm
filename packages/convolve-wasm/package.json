@@ -1,22 +1,18 @@
 {
-  "name": "@agunal/convolve-wasm",
+  "name": "@takana-labs/convolve-wasm",
   "version": "0.1.0",
   "description": "Browser-side stereo audio convolution powered by a Rust/WebAssembly DSP core.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agunal/convolve-wasm.git",
+    "url": "git+https://github.com/takana-labs/convolve-wasm.git",
     "directory": "packages/convolve-wasm"
   },
   "bugs": {
-    "url": "https://github.com/agunal/convolve-wasm/issues"
+    "url": "https://github.com/takana-labs/convolve-wasm/issues"
   },
-  "homepage": "https://github.com/agunal/convolve-wasm#readme",
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
+  "homepage": "https://convolve-wasm.app/",
   "scripts": {
     "test": "vitest run",
     "build:js": "vite build",

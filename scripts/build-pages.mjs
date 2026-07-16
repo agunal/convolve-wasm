@@ -13,8 +13,8 @@ function run(args, env = process.env) {
 }
 
 run(["run", "build:wasm"]);
-run(["run", "build", "-w", "@agunal/convolve-wasm"]);
-run(["run", "build", "-w", "@agunal/convolve-demo"], {
+run(["run", "build", "-w", "@takana-labs/convolve-wasm"]);
+run(["run", "build", "-w", "@takana-labs/convolve-demo"], {
   ...process.env,
   CONVOLVE_DEMO_BASE: "/convolve-wasm/",
 });

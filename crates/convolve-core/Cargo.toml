@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Deterministic Rust/WASM DSP core for browser-side stereo audio convolution"
-repository = "https://github.com/agunal/convolve-wasm"
+repository = "https://github.com/takana-labs/convolve-wasm"
 publish = false
 
 [lib]

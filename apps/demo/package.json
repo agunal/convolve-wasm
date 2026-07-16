@@ -1,5 +1,5 @@
 {
-  "name": "@agunal/convolve-demo",
+  "name": "@takana-labs/convolve-demo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@agunal/convolve-wasm": "0.1.0"
+    "@takana-labs/convolve-wasm": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const docsRoot = path.join(root, "docs");
 const rawPrefix =
-  "https://raw.githubusercontent.com/agunal/convolve-wasm/main/";
+  "https://raw.githubusercontent.com/takana-labs/convolve-wasm/main/";
 const ignoredDirectories = new Set(["superpowers"]);
 const entryFiles = [
   path.join(root, "README.md"),

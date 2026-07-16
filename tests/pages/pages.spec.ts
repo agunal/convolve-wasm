@@ -8,10 +8,10 @@ interface BrowserFailures {
 }
 
 const expectedFooterUrls = [
-  "https://github.com/agunal/convolve-wasm",
-  "https://github.com/agunal/convolve-wasm/blob/main/packages/convolve-wasm/README.md",
-  "https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md",
-  "https://github.com/agunal/convolve-wasm/issues",
+  "https://github.com/takana-labs/convolve-wasm",
+  "https://github.com/takana-labs/convolve-wasm/blob/main/packages/convolve-wasm/README.md",
+  "https://github.com/takana-labs/convolve-wasm/blob/main/docs/browser-support.md",
+  "https://github.com/takana-labs/convolve-wasm/issues",
 ];
 
 function watchFailures(page: Page): BrowserFailures {

@@ -52,7 +52,7 @@ Evidence: GitHub Actions run `29392630499`, where `fixture`, `windows-matrix`, a
 
 ### Completed npm bootstrap investigation
 
-- [x] Query the public registry for `@agunal/convolve-wasm` and `@agunal/convolve-wasm@0.1.0`.
+- [x] Query the public registry for `@takana-labs/convolve-wasm` and `@takana-labs/convolve-wasm@0.1.0`.
 - [x] Confirm both returned registry `E404` on 2026-07-15 in GitHub Actions run `29393336600`.
 - [x] Confirm the package is therefore brand-new rather than an existing package with an unpublished version.
 - [x] Record that npm trusted publishing is configured from an existing package's settings and cannot be attached before that package exists.
@@ -68,7 +68,7 @@ The GitHub environment and npm credential are post-merge, pre-publication contro
 
 ## Why v0.1.0 needs a bootstrap publish
 
-npm trusted publishing is configured from the package settings page. The registry probe proved that `@agunal/convolve-wasm` does not yet exist, so no package settings page exists. npm staged publishing also requires an existing package and cannot create the first version.
+npm trusted publishing is configured from the package settings page. The registry probe proved that `@takana-labs/convolve-wasm` does not yet exist, so no package settings page exists. npm staged publishing also requires an existing package and cannot create the first version.
 
 Therefore v0.1.0 requires one tightly controlled traditional authentication event. That event must still occur on a GitHub-hosted runner with `id-token: write` and `--provenance`, so the first public version receives provenance. After publication, the token path must be removed operationally by revoking the credential and configuring trusted publishing.
 
@@ -111,7 +111,7 @@ The workflow then runs `npm pack` once, inspects the exact `.tgz`, writes `pack.
 source_commit:             exact tagged source SHA
 artifact_run_id:           successful Build Release Candidate workflow run
 tarball_sha256:            approved lowercase SHA-256
-bootstrap_acknowledgement: BOOTSTRAP @agunal/convolve-wasm@0.1.0
+bootstrap_acknowledgement: BOOTSTRAP @takana-labs/convolve-wasm@0.1.0
 ```
 
 It verifies:

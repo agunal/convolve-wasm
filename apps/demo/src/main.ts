@@ -3,7 +3,7 @@ import {
   ConvolveError,
   type BeatPanSource,
   type ConvolveMetadata,
-} from "@agunal/convolve-wasm";
+} from "@takana-labs/convolve-wasm";
 
 import "./styles.css";
 import "./footer-icons.css";

@@ -63,12 +63,12 @@ for (const file of files) {
       continue;
     }
 
-    if (reference === "https://github.com/agunal/convolve-wasm") {
+    if (reference === "https://github.com/takana-labs/convolve-wasm") {
       checked += 1;
       continue;
     }
 
-    if (reference === "https://agunal.github.io/convolve-wasm/") {
+    if (reference === "https://convolve-wasm.app/") {
       checked += 1;
       continue;
     }

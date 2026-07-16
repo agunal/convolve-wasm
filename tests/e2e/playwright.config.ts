@@ -30,7 +30,7 @@ export default defineConfig({
   ],
   webServer: {
     command:
-      "npm run dev -w @agunal/convolve-demo -- --host 127.0.0.1 --port 4173",
+      "npm run dev -w @takana-labs/convolve-demo -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120_000,
