@@ -7,6 +7,13 @@ interface BrowserFailures {
   consoleErrors: string[];
 }
 
+const expectedResourceUrls = [
+  "https://github.com/agunal/convolve-wasm",
+  "https://github.com/agunal/convolve-wasm/blob/main/packages/convolve-wasm/README.md",
+  "https://github.com/agunal/convolve-wasm/blob/main/docs/browser-support.md",
+  "https://github.com/agunal/convolve-wasm/blob/main/docs/releases/v0.1.0.md",
+];
+
 function watchFailures(page: Page): BrowserFailures {
   const failures: BrowserFailures = { pageErrors: [], consoleErrors: [] };
   page.on("pageerror", (error) => failures.pageErrors.push(error.message));
@@ -43,7 +50,10 @@ test(
       await expect(page.locator(".site-footer")).toContainText("never uploaded");
 
       const resourceLinks = page.locator("#about .resource-links a");
-      await expect(resourceLinks).toHaveCount(4);
+      await expect(resourceLinks).toHaveCount(expectedResourceUrls.length);
+      await expect
+        .poll(() => resourceLinks.evaluateAll((links) => links.map((link) => link.href)))
+        .toEqual(expectedResourceUrls);
 
       await page.locator("#audio-a").setInputFiles({
         name: "a.wav",
