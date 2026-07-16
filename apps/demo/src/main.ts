@@ -6,6 +6,7 @@ import {
 } from "@agunal/convolve-wasm";
 
 import "./styles.css";
+import "./footer-icons.css";
 
 function element<T extends Element>(selector: string): T {
   const value = document.querySelector<T>(selector);
