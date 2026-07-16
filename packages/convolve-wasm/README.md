@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/agunal/convolve-wasm/v0.1.0/docs/assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
+  <img src="https://raw.githubusercontent.com/agunal/convolve-wasm/main/docs/assets/convolve-wasm-logo.png" alt="convolve-wasm logo" width="192" />
 </p>
 
 # @agunal/convolve-wasm

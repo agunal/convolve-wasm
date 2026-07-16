@@ -11,13 +11,14 @@
     "build:wasm": "cd crates/convolve-core && wasm-pack build --target web --out-dir ../../packages/convolve-wasm/src/wasm --out-name convolve_core",
     "build": "npm run build:wasm && npm run build -w @agunal/convolve-wasm && npm run build -w @agunal/convolve-demo",
     "build:pages": "node scripts/build-pages.mjs",
+    "validate:docs": "node scripts/validate-doc-assets.mjs",
     "validate:pages": "node scripts/validate-pages.mjs",
     "test:rust": "cargo test --workspace",
     "test:ts": "npm run build:wasm && npm run build -w @agunal/convolve-wasm && npm run test -w @agunal/convolve-wasm",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "test:pages": "playwright test -c tests/pages/playwright.config.ts",
     "test": "npm run test:rust && npm run test:ts",
-    "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && npm run test && npm run build"
+    "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && npm run validate:docs && npm run test && npm run build"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

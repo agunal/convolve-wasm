@@ -39,6 +39,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Validate documentation image assets
+        run: npm run validate:docs
+
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
 
