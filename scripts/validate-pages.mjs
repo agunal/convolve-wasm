@@ -58,10 +58,37 @@ if (html.includes("/src/")) {
 
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/gu)) {
   const reference = match[1];
+
+  if (!reference) {
+    continue;
+  }
+
+  // Ignore external URLs, protocol-relative URLs, and page fragments.
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/iu.test(reference)) {
+    continue;
+  }
+
+  if (reference.startsWith("/convolve-wasm/")) {
+    throw new Error(
+      `Pages HTML contains the obsolete /convolve-wasm/ prefix: ${reference}`,
+    );
+  }
+
+  if (!reference.startsWith("/")) {
+    throw new Error(
+      `Pages HTML contains a non-root-relative local reference: ${reference}`,
+    );
+  }
+}
+
+/*
+for (const match of html.matchAll(/(?:src|href)="([^"]+)"/gu)) {
+  const reference = match[1];
   if (!reference?.startsWith("/") || reference.startsWith("/convolve-wasm/")) {
     throw new Error(`Pages HTML contains a domain-root asset reference: ${reference}`);
   }
 }
+*/
 
 console.log(
   JSON.stringify(
