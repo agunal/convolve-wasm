@@ -16,5 +16,5 @@ run(["run", "build:wasm"]);
 run(["run", "build", "-w", "@takana-labs/convolve-wasm"]);
 run(["run", "build", "-w", "@takana-labs/convolve-demo"], {
   ...process.env,
-  CONVOLVE_DEMO_BASE: "/convolve-wasm/",
+  CONVOLVE_DEMO_BASE: "/",
 });
