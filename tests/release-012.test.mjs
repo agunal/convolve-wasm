@@ -85,3 +85,17 @@ test("v0.1.2 evidence and release notes retain the lower-memory release contract
   assert.ok(browserSupport.includes("iOS remains best effort"));
   assert.ok(packageReadme.includes("pull-based PCM24 streaming"));
 });
+
+test("v0.1.2 evidence defines both private-pair scenarios with exact options", async () => {
+  const evidence = await source("docs/testing/2026-07-18-lower-memory-full-fft.md");
+
+  assert.ok(evidence.includes("Both scenarios below must use this exact pair"));
+  assert.match(
+    evidence,
+    /Plain safe rejection[\s\S]*`appendReverse: false`[\s\S]*No beat-pan[\s\S]*235,793,987 bytes/,
+  );
+  assert.match(
+    evidence,
+    /Reverse \+ beat-pan safe rejection[\s\S]*`appendReverse: true`[\s\S]*source `a`[\s\S]*250,835,531 bytes/,
+  );
+});

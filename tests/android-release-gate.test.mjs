@@ -20,3 +20,45 @@ for (const [name, first, second] of [
     assert.throws(() => validatePhysicalAndroidEvidence(first, second), /must contain exactly/);
   });
 }
+for (const [name, evidence] of [
+  [
+    "a canonical Pass hidden only in a fenced code block",
+    "```md\n**Physical Android status:** Pass\n```",
+  ],
+  [
+    "an indented status marker alongside the canonical field",
+    `${pass}    **Physical Android status:** Pass`,
+  ],
+  [
+    "a blockquote status marker alongside the canonical field",
+    `${pass}> **Physical Android status:** Pass`,
+  ],
+  [
+    "a list status marker alongside the canonical field",
+    `${pass}- **Physical Android status:** Pass`,
+  ],
+  ["a whitespace variant", "**Physical Android status:** Pass "],
+  ["a case variant", "**Physical Android Status:** Pass"],
+  ["a malformed emphasis variant", "**Physical Android status**: Pass"],
+  [
+    "duplicate canonical fields",
+    `${pass}**Physical Android status:** Pass`,
+  ],
+  [
+    "a canonical field plus a conflicting field",
+    `${pass}**Physical Android status:** Not run`,
+  ],
+  [
+    "prose containing a status-marker lookalike",
+    `${pass}The required marker is **Physical Android status:** Pass.`,
+  ],
+]) {
+  test(`Android release gate rejects ${name}`, () => {
+    assert.throws(() => validatePhysicalAndroidEvidence(evidence, pass), /must contain exactly/);
+  });
+}
+
+test("Android release gate accepts one canonical field outside a fenced example", () => {
+  const evidence = `${pass}\n\`\`\`md\n**Physical Android status:** Not run\n\`\`\`\n`;
+  assert.doesNotThrow(() => validatePhysicalAndroidEvidence(evidence, pass));
+});
