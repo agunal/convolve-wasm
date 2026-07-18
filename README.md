@@ -86,7 +86,7 @@ Beat panning intentionally removes the original stereo width: the convolved ster
 
 ## Development
 
-Requirements: Node.js `^20.19.0 || >=22.12.0`, stable Rust with `wasm32-unknown-unknown`, and `wasm-pack`.
+Requirements: Node.js `^24.0.0`, stable Rust with `wasm32-unknown-unknown`, and `wasm-pack`.
 
 ```bash
 npm ci

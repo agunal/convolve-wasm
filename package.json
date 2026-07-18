@@ -5,7 +5,7 @@
     "apps/*"
   ],
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": "^24.0.0"
   },
   "scripts": {
     "build:wasm": "cd crates/convolve-core && wasm-pack build --target web --out-dir ../../packages/convolve-wasm/src/wasm --out-name convolve_core",
@@ -13,6 +13,7 @@
     "build:pages": "node scripts/build-pages.mjs",
     "validate:docs": "node scripts/validate-doc-assets.mjs",
     "validate:identity": "node scripts/validate-project-identity.mjs",
+    "validate:toolchain": "node scripts/validate-node-toolchain.mjs",
     "validate:links": "node scripts/validate-repo-links.mjs",
     "validate:pages": "node scripts/validate-pages.mjs",
     "test:rust": "cargo test --workspace",
@@ -20,7 +21,7 @@
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "test:pages": "playwright test -c tests/pages/playwright.config.ts",
     "test": "npm run test:rust && npm run test:ts",
-    "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && npm run validate:docs && npm run validate:identity && npm run validate:links && npm run test && npm run build && npm run validate:jsr",
+    "check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && npm run validate:toolchain && npm run validate:docs && npm run validate:identity && npm run validate:links && npm run test && npm run build && npm run validate:jsr",
     "validate:jsr": "cd packages/convolve-wasm && npx --yes jsr@0.14.3 publish --dry-run"
   },
   "devDependencies": {
