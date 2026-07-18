@@ -57,3 +57,12 @@ fn inverse_fft_is_scaled_by_transform_length() {
     assert_approx_eq(&output.left, &[1.0, 2.0, 1.0], 1e-5);
     assert_approx_eq(&output.right, &[1.0, 2.0, 1.0], 1e-5);
 }
+
+#[test]
+fn channel_buffers_release_the_fft_tail_capacity() {
+    let a = stereo(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0]);
+    let b = stereo(&[1.0, 2.0, 3.0, 4.0], &[4.0, 3.0, 2.0, 1.0]);
+    let output = convolve_stereo(&a, &b).unwrap();
+    assert_eq!(output.left.capacity(), output.frames());
+    assert_eq!(output.right.capacity(), output.frames());
+}

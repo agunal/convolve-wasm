@@ -8,6 +8,7 @@ mod panning;
 mod processor;
 mod reverse;
 mod true_peak;
+mod views;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 mod wav;
@@ -24,7 +25,10 @@ pub use reverse::append_reverse;
 pub use true_peak::{NormalizationResult, estimate_true_peak, normalize_true_peak};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{WasmProcessResult, process_audio_wasm};
-pub use wav::encode_pcm24_wav;
+pub use wav::{
+    PCM24_CHUNK_BYTES, PCM24_CHUNK_FRAMES, WAV_HEADER_BYTES, encode_pcm24_chunk, encode_pcm24_wav,
+    encode_pcm24_wav_to_sink, wav_pcm24_header,
+};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 

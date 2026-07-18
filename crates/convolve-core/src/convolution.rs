@@ -1,4 +1,4 @@
-use realfft::RealFftPlanner;
+use realfft::{RealFftPlanner, num_complex::Complex, num_traits::Zero};
 
 use crate::{ConvolveCoreError, SAMPLE_RATE, StereoAudio, convolution_frames, estimate_peak_bytes};
 
@@ -31,23 +31,25 @@ fn convolve_channel(a: &[f32], b: &[f32]) -> Result<Vec<f32>, ConvolveCoreError>
 
     let mut spectrum_a = forward.make_output_vec();
     let mut spectrum_b = forward.make_output_vec();
+    let mut fft_scratch =
+        vec![Complex::<f32>::zero(); forward.get_scratch_len().max(inverse.get_scratch_len())];
     forward
-        .process(&mut time_a, &mut spectrum_a)
+        .process_with_scratch(&mut time_a, &mut spectrum_a, &mut fft_scratch)
         .map_err(ConvolveCoreError::fft)?;
     forward
-        .process(&mut time_b, &mut spectrum_b)
+        .process_with_scratch(&mut time_b, &mut spectrum_b, &mut fft_scratch)
         .map_err(ConvolveCoreError::fft)?;
 
     for (left, right) in spectrum_a.iter_mut().zip(spectrum_b) {
         *left *= right;
     }
 
-    let mut output = inverse.make_output_vec();
+    let mut inverse_output = inverse.make_output_vec();
     inverse
-        .process(&mut spectrum_a, &mut output)
+        .process_with_scratch(&mut spectrum_a, &mut inverse_output, &mut fft_scratch)
         .map_err(ConvolveCoreError::fft)?;
 
-    output.truncate(output_len);
+    let mut output = inverse_output[..output_len].to_vec();
     let scale = 1.0 / fft_len as f32;
     for sample in &mut output {
         *sample *= scale;

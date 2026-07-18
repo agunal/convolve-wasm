@@ -1,7 +1,9 @@
 use crate::{
     BeatPanSource, ConvolveCoreError, ProcessMetadata, ProcessOptions, SAMPLE_RATE, StereoAudio,
-    append_reverse, apply_beat_pan, convolve_stereo, detect_beat_grid, encode_pcm24_wav,
-    estimate_peak_bytes, normalize_true_peak,
+    apply_beat_pan, convolve_stereo, detect_beat_grid, estimate_peak_bytes,
+    true_peak::normalization_for_view,
+    views::{ForwardView, GainView, PalindromeView, StereoSampleView},
+    wav::encode_pcm24_wav_view,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,15 +79,14 @@ where
         None => (0, None, None),
     };
 
-    if append_reverse_output {
-        output = append_reverse(&output, effective_crossfade_samples);
+    let (normalization, output_frames, wav_bytes) = if append_reverse_output {
         on_progress(ProcessStage::AppendReverse);
-    }
-
-    let normalization = normalize_true_peak(&mut output, options.target_dbtp)?;
+        let reversed = PalindromeView::new(ForwardView::new(&output), effective_crossfade_samples);
+        encode_normalized_view(reversed, options.target_dbtp)?
+    } else {
+        encode_normalized_view(ForwardView::new(&output), options.target_dbtp)?
+    };
     on_progress(ProcessStage::Normalize);
-    let output_frames = output.frames();
-    let wav_bytes = encode_pcm24_wav(&output)?;
     on_progress(ProcessStage::Encode);
     let metadata = ProcessMetadata {
         sample_rate: SAMPLE_RATE,
@@ -105,4 +106,14 @@ where
     };
     on_progress(ProcessStage::Done);
     Ok(result)
+}
+
+fn encode_normalized_view<V: StereoSampleView>(
+    view: V,
+    target_dbtp: f32,
+) -> Result<(crate::NormalizationResult, usize, Vec<u8>), ConvolveCoreError> {
+    let (normalization, gain) = normalization_for_view(&view, target_dbtp)?;
+    let output_frames = view.frames();
+    let wav_bytes = encode_pcm24_wav_view(&GainView::new(view, gain))?;
+    Ok((normalization, output_frames, wav_bytes))
 }

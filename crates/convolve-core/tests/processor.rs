@@ -60,6 +60,13 @@ fn estimates_small_request_below_limit() {
 }
 
 #[test]
+fn rust_guard_uses_the_reduced_option_independent_workspace_model() {
+    let plain = estimate_peak_bytes(48_000, 24_000, false, 0).unwrap();
+    let reverse = estimate_peak_bytes(48_000, 24_000, true, 240).unwrap();
+    assert_eq!(plain, 21_861_368);
+    assert_eq!(reverse, plain);
+}
+#[test]
 fn rejects_estimates_over_256_mib() {
     let error = estimate_peak_bytes(20_000_000, 20_000_000, true, 240).unwrap_err();
     assert_eq!(error.code(), "INPUT_TOO_LARGE");
