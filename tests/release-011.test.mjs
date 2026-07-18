@@ -39,3 +39,18 @@ test("release packaging requires an explicit physical Android Pass", async () =>
     /^\*\*Physical Android status:\*\* (?:Not run|Failed|Pass)$/mu,
   );
 });
+
+test("CI and release-candidate pin the same wasm-pack version", async () => {
+  const [ci, candidate] = await Promise.all([
+    source(".github/workflows/ci.yml"),
+    source(".github/workflows/release-candidate.yml"),
+  ]);
+  const installPattern = /cargo install wasm-pack --version (\d+\.\d+\.\d+) --locked/g;
+  const ciPins = [...ci.matchAll(installPattern)];
+  const candidatePins = [...candidate.matchAll(installPattern)];
+
+  assert.equal(ciPins.length, 1);
+  assert.equal(candidatePins.length, 1);
+  assert.equal(ciPins[0][1], candidatePins[0][1]);
+  assert.equal(ciPins[0][1], "0.15.0");
+});

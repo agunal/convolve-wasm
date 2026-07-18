@@ -197,13 +197,19 @@ function isReady(expectedNonce) {
   });
 }
 
-async function lifecycleStatus() {
-  const record = readPidRecord();
+export async function lifecycleStatus({
+  readPidRecord: readRecord = readPidRecord,
+  isPortOccupied: portOccupied = isPortOccupied,
+  isProcessAlive: processAlive = isProcessAlive,
+  isOwnedProcess: processOwned = isOwnedProcess,
+  isReady: ready = isReady,
+} = {}) {
+  const record = readRecord();
   if (record?.invalid) {
     return { state: "blocked", detail: "invalid PID record" };
   }
   if (!record) {
-    if (await isPortOccupied()) {
+    if (await portOccupied()) {
       return {
         state: "blocked",
         detail: "port 4173 is occupied without an app-owned PID record",
@@ -211,8 +217,8 @@ async function lifecycleStatus() {
     }
     return { state: "stopped" };
   }
-  if (!isProcessAlive(record.pid)) {
-    if (await isPortOccupied()) {
+  if (!processAlive(record.pid)) {
+    if (await portOccupied()) {
       return {
         state: "blocked",
         detail: "recorded PID is stale but port 4173 remains occupied",
@@ -221,7 +227,7 @@ async function lifecycleStatus() {
     }
     return { state: "stale-pid", pid: record.pid };
   }
-  if (!isOwnedProcess(record.pid)) {
+  if (!processOwned(record.pid)) {
     return {
       state: "blocked",
       detail: "PID record no longer owns the app process",
@@ -229,7 +235,7 @@ async function lifecycleStatus() {
     };
   }
   return {
-    state: (await isReady(record.nonce)) ? "running-healthy" : "running-unhealthy",
+    state: (await ready(record.nonce)) ? "running-healthy" : "running-unhealthy",
     pid: record.pid,
   };
 }
@@ -287,77 +293,51 @@ function buildApp() {
   }
 }
 
-function spawnWindowsServer(hidden, nonce) {
-  const launchPidPath = join(runtimeDir, "launch.pid");
-  rmSync(launchPidPath, { force: true });
-  const script = [
-    "$parameters = @{ FilePath = $env:CONVOLVE_NODE_PATH",
-    "ArgumentList = ('\"' + $env:CONVOLVE_HELPER_PATH + '\"')",
-    "WorkingDirectory = $env:CONVOLVE_REPO_ROOT",
-    "PassThru = $true }",
-    "if ($env:CONVOLVE_APP_HIDDEN -eq '1') { $parameters.WindowStyle = 'Hidden' }",
-    "$process = Start-Process @parameters",
-    "Set-Content -LiteralPath $env:CONVOLVE_LAUNCH_PID_PATH -Value $process.Id -NoNewline",
-  ].join("; ");
-  const result = spawnSync(
-    windowsPowershellPath,
-    ["-NoProfile", "-NonInteractive", "-Command", script],
-    {
-      cwd: repoRoot,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        CONVOLVE_APP_HIDDEN: hidden ? "1" : "0",
-        CONVOLVE_APP_NONCE: nonce,
-        CONVOLVE_HELPER_PATH: serverHelperPath,
-        CONVOLVE_LAUNCH_PID_PATH: launchPidPath,
-        CONVOLVE_NODE_PATH: process.execPath,
-        CONVOLVE_REPO_ROOT: repoRoot,
-        CONVOLVE_STDERR_PATH: stderrPath,
-        CONVOLVE_STDOUT_PATH: stdoutPath,
-      },
-      windowsHide: true,
-    },
-  );
-  if (result.status !== 0) {
-    throw new Error("Failed to start the Windows app process");
-  }
-  const pid = Number.parseInt(
-    existsSync(launchPidPath) ? readFileSync(launchPidPath, "utf8") : "",
-    10,
-  );
-  rmSync(launchPidPath, { force: true });
-  if (!Number.isSafeInteger(pid) || pid < 1) {
-    throw new Error("Start-Process did not return a valid PID");
-  }
-  return pid;
-}
-
-function spawnBackgroundServer(hidden, nonce) {
-  if (process.platform === "win32") {
-    return spawnWindowsServer(hidden, nonce);
-  }
-  const stdout = openSync(stdoutPath, "a");
-  const stderr = openSync(stderrPath, "a");
+export function spawnLoggedNodeProcess({
+  scriptPath,
+  cwd,
+  stdoutPath: childStdoutPath,
+  stderrPath: childStderrPath,
+  env,
+  hidden,
+  detached,
+}) {
+  const stdout = openSync(childStdoutPath, "a");
+  const stderr = openSync(childStderrPath, "a");
   let child;
   try {
-    child = spawn(process.execPath, [serverHelperPath], {
-      cwd: repoRoot,
-      detached: true,
-      env: {
-        ...process.env,
-        CONVOLVE_APP_HIDDEN: hidden ? "1" : "0",
-        CONVOLVE_APP_NONCE: nonce,
-        CONVOLVE_STDERR_PATH: stderrPath,
-        CONVOLVE_STDOUT_PATH: stdoutPath,
-      },
+    child = spawn(process.execPath, [scriptPath], {
+      cwd,
+      detached,
+      env,
       stdio: ["ignore", stdout, stderr],
+      windowsHide: hidden,
     });
   } finally {
     closeSync(stdout);
     closeSync(stderr);
   }
-  child.unref();
+
+  if (detached) child.unref();
+  return child;
+}
+
+function spawnBackgroundServer(hidden, nonce) {
+  const child = spawnLoggedNodeProcess({
+    scriptPath: serverHelperPath,
+    cwd: repoRoot,
+    stdoutPath,
+    stderrPath,
+    env: {
+      ...process.env,
+      CONVOLVE_APP_HIDDEN: hidden ? "1" : "0",
+      CONVOLVE_APP_NONCE: nonce,
+      CONVOLVE_STDERR_PATH: stderrPath,
+      CONVOLVE_STDOUT_PATH: stdoutPath,
+    },
+    hidden,
+    detached: true,
+  });
   return child.pid;
 }
 
@@ -410,10 +390,18 @@ async function start({ hidden }) {
   console.log(`ready: ${appUrl} (pid ${pid})`);
 }
 
-async function stop() {
-  const record = readPidRecord();
+export async function stop({
+  readPidRecord: readRecord = readPidRecord,
+  isProcessAlive: processAlive = isProcessAlive,
+  isOwnedProcess: processOwned = isOwnedProcess,
+  terminateOwnedProcess,
+  waitUntilStopped: waitStopped = waitUntilStopped,
+  removePidRecord: removeRecord = removePidRecord,
+  log = console.log,
+} = {}) {
+  const record = readRecord();
   if (!record) {
-    console.log("already stopped");
+    log("already stopped");
     return;
   }
   if (record.invalid) {
@@ -421,19 +409,21 @@ async function stop() {
       `Invalid PID record at ${pidPath}; remove it only after verifying no app process is running.`,
     );
   }
-  if (isProcessAlive(record.pid)) {
-    if (!isOwnedProcess(record.pid)) {
+  if (processAlive(record.pid)) {
+    if (!processOwned(record.pid)) {
       throw new Error(
         `Refusing to stop PID ${record.pid} because it is not the app-owned server process.`,
       );
     }
-    if (process.platform === "win32") {
+    if (terminateOwnedProcess) {
+      terminateOwnedProcess(record.pid);
+    } else if (process.platform === "win32") {
       const result = spawnSync(
         "taskkill.exe",
         ["/PID", String(record.pid), "/T", "/F"],
         { encoding: "utf8", windowsHide: true },
       );
-      if (result.status !== 0 && isProcessAlive(record.pid)) {
+      if (result.status !== 0 && processAlive(record.pid)) {
         throw new Error(
           `Failed to stop PID ${record.pid}: ${result.stderr || result.stdout}`,
         );
@@ -446,14 +436,14 @@ async function stop() {
       }
     }
   }
-  if (!(await waitUntilStopped(record.pid))) {
+  if (!(await waitStopped(record.pid))) {
     throw new Error(
       `PID ${record.pid} or port 4173 did not stop within 10 seconds; retaining the PID record.`,
     );
   }
 
-  removePidRecord();
-  console.log("stopped");
+  removeRecord();
+  log("stopped");
 }
 
 function tailFile(path, lineCount) {
