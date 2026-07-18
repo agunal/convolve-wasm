@@ -7,6 +7,7 @@
 Client-side stereo audio convolution powered by a Rust/WASM DSP core and a dedicated browser worker. Audio is decoded and processed locally; the library does not upload source files or rendered output.
 
 **Use the app:** <!-- site-url:start -->https://convolve-wasm.app/<!-- site-url:end -->
+Redirect URL: <!-- site-url:start -->https://takana-labs.github.io/convolve-wasm/<!-- site-url:end -->
 
 The hosted application runs the same browser-local pipeline without requiring installation. Applications can add the public API from JSR with `npx jsr add @takana-labs/convolve-wasm`.
 
