@@ -83,6 +83,9 @@ if (!Array.isArray(publishExclude) || !publishExclude.includes("!dist")) {
 if (fs.existsSync(path.join(root, ".github/workflows/publish.yml"))) {
   failures.push("legacy npm workflow .github/workflows/publish.yml must be removed");
 }
+if (fs.existsSync(path.join(root, ".github/workflows/pages.yml"))) {
+  failures.push("redundant automatic Pages workflow .github/workflows/pages.yml must be removed");
+}
 read(".github/workflows/publish-jsr.yml");
 read("packages/convolve-wasm/LICENSE");
 
@@ -107,7 +110,6 @@ const identityFiles = [
   "docs/releases/v0.1.0.md",
   "crates/convolve-core/Cargo.toml",
   ".github/workflows/ci.yml",
-  ".github/workflows/pages.yml",
   ".github/workflows/release-candidate.yml",
   ".github/workflows/publish-jsr.yml",
 ];
