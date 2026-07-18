@@ -86,16 +86,28 @@ test("v0.1.2 evidence and release notes retain the lower-memory release contract
   assert.ok(packageReadme.includes("pull-based PCM24 streaming"));
 });
 
-test("v0.1.2 evidence defines both private-pair scenarios with exact options", async () => {
+test("v0.1.2 evidence makes both private-pair scenarios reproducible", async () => {
   const evidence = await source("docs/testing/2026-07-18-lower-memory-full-fft.md");
 
   assert.ok(evidence.includes("Both scenarios below must use this exact pair"));
   assert.match(
     evidence,
-    /Plain safe rejection[\s\S]*`appendReverse: false`[\s\S]*No beat-pan[\s\S]*235,793,987 bytes/,
+    /audio\.a[\s\S]*Supplied WAV[\s\S]*B72090BD221ECCC2AF1A59206C40BC279E0790CD2AFBD7C163409C4CF8A28FC9/,
   );
   assert.match(
     evidence,
-    /Reverse \+ beat-pan safe rejection[\s\S]*`appendReverse: true`[\s\S]*source `a`[\s\S]*250,835,531 bytes/,
+    /audio\.b[\s\S]*Supplied M4A[\s\S]*33A2AD19C95CDA18E59CD7D2745A138BA91B011ECC0606A30F4C22B0CE684059/,
+  );
+  assert.match(
+    evidence,
+    /Plain safe rejection[\s\S]*`appendReverse: false`[\s\S]*`beatPan: null`[\s\S]*`panTransitionMs: 20`[\s\S]*`reverseCrossfadeMs: 5`[\s\S]*`targetDbtp: -1`[\s\S]*235,793,987 bytes/,
+  );
+  assert.match(
+    evidence,
+    /Reverse \+ beat-pan safe rejection[\s\S]*`appendReverse: true`[\s\S]*`beatPan: "a"`[\s\S]*`panTransitionMs: 20`[\s\S]*`reverseCrossfadeMs: 5`[\s\S]*`targetDbtp: -1`[\s\S]*250,835,531 bytes/,
+  );
+  assert.match(
+    evidence,
+    /`appendReverse` and `reverseCrossfadeMs` affect `finalFrames` and the memory estimate[\s\S]*`beatPan`, `panTransitionMs`, and `targetDbtp` are DSP-only and do not change the estimate/,
   );
 });

@@ -10,17 +10,19 @@ This is the required physical-device template for the v0.1.2 candidate. It must 
 
 The following WAV and M4A are one exact private input pair. Both scenarios below must use this exact pair together; do not substitute one input, use either file alone, or pair either hash with any other audio.
 
-| Pair member | SHA-256 |
-|---|---|
-| Supplied WAV | `B72090BD221ECCC2AF1A59206C40BC279E0790CD2AFBD7C163409C4CF8A28FC9` (`B72090…FC9`) |
-| Supplied M4A | `33A2AD19C95CDA18E59CD7D2745A138BA91B011ECC0606A30F4C22B0CE684059` (`33A2AD…059`) |
+| API input | Pair member | Full SHA-256 |
+|---|---|---|
+| `audio.a` | Supplied WAV | `B72090BD221ECCC2AF1A59206C40BC279E0790CD2AFBD7C163409C4CF8A28FC9` (`B72090…FC9`) |
+| `audio.b` | Supplied M4A | `33A2AD19C95CDA18E59CD7D2745A138BA91B011ECC0606A30F4C22B0CE684059` (`33A2AD…059`) |
 
 | Scenario | Exact options for the private pair | v0.1.2 estimate | 4 GB browser budget | Required outcome |
 |---|---|---:|---:|---|
-| Plain safe rejection | `appendReverse: false`; No beat-pan (`beatPan: null`) | 235,793,987 bytes (224.87 MiB) | 201,326,592 bytes (192 MiB) | readable pre-worker `INPUT_TOO_LARGE` |
-| Reverse + beat-pan safe rejection | `appendReverse: true`; `beatPan: "a"` (source `a`) | 250,835,531 bytes (239.22 MiB) | 201,326,592 bytes (192 MiB) | readable pre-worker `INPUT_TOO_LARGE` |
+| Plain safe rejection | `appendReverse: false`; `beatPan: null`; `panTransitionMs: 20`; `reverseCrossfadeMs: 5`; `targetDbtp: -1` | 235,793,987 bytes (224.87 MiB) | 201,326,592 bytes (192 MiB) | readable pre-worker `INPUT_TOO_LARGE` |
+| Reverse + beat-pan safe rejection | `appendReverse: true`; `beatPan: "a"`; `panTransitionMs: 20`; `reverseCrossfadeMs: 5`; `targetDbtp: -1` | 250,835,531 bytes (239.22 MiB) | 201,326,592 bytes (192 MiB) | readable pre-worker `INPUT_TOO_LARGE` |
 
 These corrected streaming estimates use `E + 3D + F + X + W + 2C + 32 MiB`, with the 68-byte WAVE_FORMAT_EXTENSIBLE header and two 393,216-byte PCM24 chunks. The pair must not be used to bypass the browser budget: on a reported 4 GB device both cases are expected to reject safely. Record actual decoded frame counts and error details below.
+
+`appendReverse` and `reverseCrossfadeMs` affect `finalFrames` and the memory estimate (the crossfade affects final frames only when reverse append is enabled). `beatPan`, `panTransitionMs`, and `targetDbtp` are DSP-only and do not change the estimate.
 
 ## Required device record
 
