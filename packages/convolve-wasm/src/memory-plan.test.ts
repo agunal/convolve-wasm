@@ -47,7 +47,7 @@ describe("mobile-safe memory planning", () => {
     });
   });
 
-  it("includes materialized reverse output, WAV copies, and beat-pan scratch", () => {
+  it("includes virtual reverse output and two bounded PCM chunks without beat-pan scratch", () => {
     const plan = estimateFullPipelineMemory({
       aFrames: 770_684,
       bFrames: 1_736_481,

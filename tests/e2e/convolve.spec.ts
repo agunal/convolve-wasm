@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -9,6 +11,16 @@ import {
   makeSourceAWav,
   readWavHeader,
 } from "./fixtures";
+
+const BROWSER_WAV_SHA256 = {
+  plain: "301846c1872c07cf8dbc71d62d524cd2a9c7aa3d9aab921ff8c475702b707a3c",
+  reverse: "85ba256457e2ec737e0418f31fdcd5347a8d92d1acc1b2b81d556fbd786b8074",
+  beatPan: "c393693260a14edf78536cb0535a439cd9a57c59f0520f2bc5270f2f58b06162",
+} as const;
+
+function sha256(output: Uint8Array): string {
+  return createHash("sha256").update(output).digest("hex");
+}
 
 interface BrowserFailures {
   pageErrors: string[];
@@ -88,6 +100,7 @@ test("creates a playable PCM24 WAV with the full convolution length", async ({
     output,
     SOURCE_A_FRAMES + IMPULSE_RESPONSE_FRAMES - 1,
   );
+  expect(sha256(output)).toBe(BROWSER_WAV_SHA256.plain);
   expectNoBrowserFailures(failures);
 });
 
@@ -102,6 +115,7 @@ test("appends an exact reverse using the default five-millisecond overlap", asyn
   const output = await runAndReadOutput(page);
   const forwardFrames = SOURCE_A_FRAMES + IMPULSE_RESPONSE_FRAMES - 1;
   expectPcm24WavLayout(output, 2 * forwardFrames - 240);
+  expect(sha256(output)).toBe(BROWSER_WAV_SHA256.reverse);
   expectNoBrowserFailures(failures);
 });
 
@@ -119,6 +133,7 @@ test("reports detected beats for a 120 BPM click track", async ({ page }) => {
   const expectedFrames = CLICK_TRACK_FRAMES + IMPULSE_RESPONSE_FRAMES - 1;
   expect(expectedFrames).toBeGreaterThan(65_536);
   expectPcm24WavLayout(output, expectedFrames);
+  expect(sha256(output)).toBe(BROWSER_WAV_SHA256.beatPan);
   expectNoBrowserFailures(failures);
 });
 

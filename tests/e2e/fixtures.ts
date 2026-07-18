@@ -1,7 +1,19 @@
-export const SAMPLE_RATE = 48_000;
-export const SOURCE_A_FRAMES = SAMPLE_RATE / 4;
-export const IMPULSE_RESPONSE_FRAMES = SAMPLE_RATE / 10;
-export const CLICK_TRACK_FRAMES = SAMPLE_RATE * 8;
+import {
+  CLICK_TRACK_FRAMES,
+  IMPULSE_RESPONSE_FRAMES,
+  SAMPLE_RATE,
+  SOURCE_A_FRAMES,
+  clickTrackPcm16,
+  impulseResponsePcm16,
+  sourceAPcm16,
+} from "./fixture-pcm.mjs";
+
+export {
+  CLICK_TRACK_FRAMES,
+  IMPULSE_RESPONSE_FRAMES,
+  SAMPLE_RATE,
+  SOURCE_A_FRAMES,
+};
 
 function clampPcm16(sample: number): number {
   if (sample <= -1) return -32_768;
@@ -9,7 +21,7 @@ function clampPcm16(sample: number): number {
   return Math.round(sample * 32_767);
 }
 
-export function encodePcm16Wav(channels: readonly Float32Array[]): Buffer {
+export function encodePcm16Wav(channels: readonly (Float32Array | Int16Array)[]): Buffer {
   if (channels.length === 0 || channels.length > 2) {
     throw new Error("Fixtures support one or two channels");
   }
@@ -39,7 +51,12 @@ export function encodePcm16Wav(channels: readonly Float32Array[]): Buffer {
   let offset = 44;
   for (let frame = 0; frame < frames; frame += 1) {
     for (const channel of channels) {
-      output.writeInt16LE(clampPcm16(channel[frame]!), offset);
+      output.writeInt16LE(
+        channel instanceof Int16Array
+          ? channel[frame]!
+          : clampPcm16(channel[frame]!),
+        offset,
+      );
       offset += bytesPerSample;
     }
   }
@@ -47,37 +64,15 @@ export function encodePcm16Wav(channels: readonly Float32Array[]): Buffer {
 }
 
 export function makeSourceAWav(): Buffer {
-  const samples = new Float32Array(SOURCE_A_FRAMES);
-  samples[0] = 0.8;
-  for (let index = 1; index < samples.length; index += 1) {
-    samples[index] = 0.16 * Math.sin((2 * Math.PI * 440 * index) / SAMPLE_RATE);
-  }
-  return encodePcm16Wav([samples]);
+  return encodePcm16Wav([sourceAPcm16()]);
 }
 
 export function makeImpulseResponseWav(): Buffer {
-  const samples = new Float32Array(IMPULSE_RESPONSE_FRAMES);
-  samples[0] = 1;
-  samples[Math.round(SAMPLE_RATE * 0.035)] = 0.35;
-  samples[Math.round(SAMPLE_RATE * 0.07)] = -0.2;
-  return encodePcm16Wav([samples]);
+  return encodePcm16Wav([impulseResponsePcm16()]);
 }
 
 export function makeClickTrackWav(): Buffer {
-  const samples = new Float32Array(CLICK_TRACK_FRAMES);
-  const period = SAMPLE_RATE / 2;
-  const clickFrames = Math.round(SAMPLE_RATE * 0.005);
-  for (let beat = 0; beat < samples.length; beat += period) {
-    for (
-      let offset = 0;
-      offset < clickFrames && beat + offset < samples.length;
-      offset += 1
-    ) {
-      const phase = offset / Math.max(1, clickFrames - 1);
-      samples[beat + offset] = 0.9 * 0.5 * (1 - Math.cos(2 * Math.PI * phase));
-    }
-  }
-  return encodePcm16Wav([samples]);
+  return encodePcm16Wav([clickTrackPcm16()]);
 }
 
 export interface WavHeader {
