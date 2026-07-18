@@ -151,10 +151,19 @@ describe("CONVOLVE", () => {
       workerClient: { process },
     });
 
-    await expect(convolve(files())).rejects.toMatchObject({
+    const audio = {
+      a: new File([new Uint8Array(4_624_148)], "a.wav", {
+        type: "audio/wav",
+      }),
+      b: new File([new Uint8Array(893_355)], "b.wav", {
+        type: "audio/wav",
+      }),
+    };
+
+    await expect(convolve(audio)).rejects.toMatchObject({
       code: "INPUT_TOO_LARGE",
       details: {
-        estimatedBytes: 294_676_426,
+        estimatedBytes: 235_793_987,
         limitBytes: 201_326_592,
         aFrames: 770_684,
         bFrames: 1_736_481,
@@ -168,6 +177,51 @@ describe("CONVOLVE", () => {
       },
     });
     expect(decode).toHaveBeenCalledTimes(2);
+    expect(process).not.toHaveBeenCalled();
+  });
+
+  it("rejects the private reverse beat-pan shape at the reported 4 GB budget", async () => {
+    const decode = vi
+      .fn<AudioDecodeBackend["decode"]>()
+      .mockResolvedValueOnce({
+        ...decoded.a,
+        frames: 770_684,
+      })
+      .mockResolvedValueOnce({
+        ...decoded.b,
+        frames: 1_736_481,
+      });
+    const process = vi.fn();
+    const convolve = createConvolver({
+      getDecodeBackend: () => ({ decode }),
+      getMemoryBudget: () => ({
+        budgetBytes: 192 * MIB,
+        deviceMemoryGiB: 4,
+      }),
+      workerClient: { process },
+    });
+    const audio = {
+      a: new File([new Uint8Array(4_624_148)], "a.wav", {
+        type: "audio/wav",
+      }),
+      b: new File([new Uint8Array(893_355)], "b.wav", {
+        type: "audio/wav",
+      }),
+    };
+
+    await expect(
+      convolve(audio, true, { beatPan: "a" }),
+    ).rejects.toMatchObject({
+      code: "INPUT_TOO_LARGE",
+      details: {
+        estimatedBytes: 250_835_531,
+        limitBytes: 192 * MIB,
+        finalFrames: 5_014_088,
+        appendReverse: true,
+        beatPan: "a",
+        deviceMemoryGiB: 4,
+      },
+    });
     expect(process).not.toHaveBeenCalled();
   });
 

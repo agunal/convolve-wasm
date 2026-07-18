@@ -17,7 +17,7 @@ export function formatConvolveError(error: ConvolveError): string {
     const estimatedBytes = byteDetail(error.details, "estimatedBytes");
     const limitBytes = byteDetail(error.details, "limitBytes");
     if (estimatedBytes !== null && limitBytes !== null) {
-      const estimatedMib = Math.ceil(estimatedBytes / MIB);
+      const estimatedMib = Math.round(estimatedBytes / MIB);
       const limitMib = Math.floor(limitBytes / MIB);
       const suggestions = ["shorter files"];
       if (error.details?.beatPan === "a" || error.details?.beatPan === "b") {

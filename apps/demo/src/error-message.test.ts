@@ -39,6 +39,23 @@ describe("formatConvolveError", () => {
     );
   });
 
+  it("rounds the lower-memory mobile estimate to 86 MiB", () => {
+    const error = new ConvolveError(
+      "INPUT_TOO_LARGE",
+      "Estimated peak memory exceeds this browser's safe limit.",
+      {
+        estimatedBytes: 90_226_830,
+        limitBytes: 67_108_864,
+        appendReverse: false,
+        beatPan: null,
+      },
+    );
+
+    expect(formatConvolveError(error)).toBe(
+      "INPUT_TOO_LARGE: This render needs about 86 MiB, above this device's 64 MiB safe limit. Try shorter files.",
+    );
+  });
+
   it("preserves the existing copy for other failures", () => {
     const error = new ConvolveError(
       "BEAT_DETECTION_FAILED",

@@ -3,6 +3,8 @@ export const MIB = 1024 * 1024;
 const SAMPLE_RATE = 48_000;
 const BYTES_PER_STEREO_FRAME = 2 * Float32Array.BYTES_PER_ELEMENT;
 const WAV_BYTES_PER_FRAME = 6;
+const WAV_HEADER_BYTES = 68;
+const PCM_CHUNK_BYTES = 393_216;
 const FFT_BYTES_PER_FRAME = 24;
 const RUNTIME_RESERVE_BYTES = 32 * MIB;
 const MIN_BUDGET_BYTES = 64 * MIB;
@@ -135,17 +137,10 @@ export function estimateFullPipelineMemory(
     outputFrames,
     BYTES_PER_STEREO_FRAME,
   );
-  const finalAudioBytes = safeMultiply(
-    finalFrames,
-    BYTES_PER_STEREO_FRAME,
-  );
   const fftWorkingBytes = safeMultiply(fftFrames, FFT_BYTES_PER_FRAME);
-  const beatPanBytes = input.beatPan
-    ? safeMultiply(outputFrames, Float32Array.BYTES_PER_ELEMENT)
-    : 0;
   const wavBytes = safeAdd(
     safeMultiply(finalFrames, WAV_BYTES_PER_FRAME),
-    44,
+    WAV_HEADER_BYTES,
   );
 
   return {
@@ -156,10 +151,9 @@ export function estimateFullPipelineMemory(
       input.encodedInputBytes,
       safeMultiply(decodedStereoBytes, 3),
       forwardAudioBytes,
-      finalAudioBytes,
       fftWorkingBytes,
-      beatPanBytes,
-      safeMultiply(wavBytes, 4),
+      wavBytes,
+      safeMultiply(PCM_CHUNK_BYTES, 2),
       RUNTIME_RESERVE_BYTES,
     ),
   };
