@@ -53,8 +53,8 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Validate identity, documentation, and links
-        run: npm run validate:identity && npm run validate:docs && npm run validate:links
+      - name: Validate toolchain, identity, documentation, and links
+        run: npm run validate:toolchain && npm run validate:identity && npm run validate:docs && npm run validate:links
 
       - name: Verify manual browser matrix is complete
         shell: bash

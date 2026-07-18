@@ -24,6 +24,15 @@ function run(
   });
 }
 
+function runNpm(args: string[], cwd: string): string {
+  const npmCli = process.env.npm_execpath;
+  if (!npmCli) {
+    throw new Error("npm_execpath is required to run package-consumer commands");
+  }
+
+  return run(process.execPath, [npmCli, ...args], cwd);
+}
+
 function listFiles(root: string, relative = ""): string[] {
   const directory = join(root, relative);
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -55,8 +64,7 @@ describe("packed package consumer", () => {
         const packDirectory = join(temporaryRoot, "pack");
         mkdirSync(packDirectory);
         const packed = JSON.parse(
-          run(
-            "npm",
+          runNpm(
             [
               "pack",
               "--json",
@@ -104,8 +112,8 @@ describe("packed package consumer", () => {
           ].join("\n"),
         );
 
-        run("npm", ["install", "--ignore-scripts"], consumer);
-        const buildOutput = run("npm", ["run", "build"], consumer);
+        runNpm(["install", "--ignore-scripts"], consumer);
+        const buildOutput = runNpm(["run", "build"], consumer);
         const dist = join(consumer, "dist");
         const files = listFiles(dist);
         const JavaScript = files

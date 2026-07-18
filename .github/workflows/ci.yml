@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -43,9 +43,12 @@ jobs:
           collect "repos/${GITHUB_REPOSITORY}" "$RUNNER_TEMP/repository.json"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.16.0
+          node-version: '24'
+
+      - name: Validate Node toolchain
+        run: npm run validate:toolchain
 
       - name: Check synchronized site URL
         run: npm run check:site-url
@@ -66,15 +69,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.16.0
+          node-version: '24'
           cache: npm
+
+      - name: Validate Node toolchain
+        run: npm run validate:toolchain
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -203,14 +209,14 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.16.0
+          node-version: '24'
 
       - name: Verify deployed Pages SHA and assets
         run: node scripts/public-site-smoke.mjs
