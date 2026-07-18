@@ -22,21 +22,56 @@ function asProgressStage(stage:string):ConvolveStage {if(!PROGRESS_STAGES.has(st
 function exactBuffer(bytes: Uint8Array): ArrayBuffer { return bytes.byteOffset===0 && bytes.byteLength===bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer ? bytes.buffer : bytes.slice().buffer; }
 
 interface ActiveOutput { request: WorkerProcessRequest; job: WasmProcessJobLike; session: WasmOutputSessionLike; metadata: ConvolveMetadata; nextSequence: number; nextOffset: number; }
+interface StartingOutput { request: WorkerProcessRequest; cancelled: boolean; }
 export function createWorkerRequestHandler(dependencies: WorkerRuntimeDependencies):(request: WorkerRequest)=>Promise<void>{
- let wasmPromise:Promise<WasmModuleLike>|undefined; const getWasm=()=>wasmPromise??=(dependencies.loadWasm()); const queued:WorkerProcessRequest[]=[]; let active:ActiveOutput|undefined; let draining=false;
+ let wasmPromise:Promise<WasmModuleLike>|undefined; const getWasm=()=>wasmPromise??=(dependencies.loadWasm()); const queued:WorkerProcessRequest[]=[]; let active:ActiveOutput|undefined; let starting:StartingOutput|undefined; let draining=false;
  const cleanup=(state:ActiveOutput|undefined)=>{if(!state)return; try{state.session.free();}finally{state.job.free();}};
  const fail=(id:string,cause:unknown,code:ConvolveErrorCode="PROCESSING_FAILED",message="Audio processing failed")=>dependencies.postMessage({type:"error",id,error:serializeError(cause,code,message)});
- const startNext=async():Promise<void>=>{if(active||draining)return; const request=queued.shift();if(!request)return;draining=true;try{
-  dependencies.postMessage({type:"progress",id:request.id,event:{stage:"load-wasm",fraction:.25}}); let wasm:WasmModuleLike;try{wasm=await getWasm();}catch(cause){fail(request.id,cause,"WASM_INIT_FAILED","Could not initialize the WASM processing core");return;}
-  if(!wasm.WasmProcessJob){ // compatibility only for older generated assets; never selected by current build.
-   if(!wasm.process_audio_wasm)throw new Error("WASM module does not export WasmProcessJob"); const {a,b,appendReverse,options}=request.payload;const legacy=wasm.process_audio_wasm(a.left,a.right,b.left,b.right,appendReverse,options,(stage,fraction)=>dependencies.postMessage({type:"progress",id:request.id,event:{stage:asProgressStage(stage),fraction}})); const wav=exactBuffer(legacy.wav_bytes()); const metadata=metadataFromResult(legacy); legacy.free(); dependencies.postMessage({type:"result",id:request.id,wav,metadata},[wav]);return;
+ const startNext=async():Promise<void>=>{
+  if(active||draining)return;
+  const request=queued.shift();
+  if(!request)return;
+  const start:StartingOutput={request,cancelled:false};
+  starting=start;
+  draining=true;
+  try{
+   dependencies.postMessage({type:"progress",id:request.id,event:{stage:"load-wasm",fraction:.25}});
+   let wasm:WasmModuleLike;
+   try{wasm=await getWasm();}catch(cause){if(!start.cancelled)fail(request.id,cause,"WASM_INIT_FAILED","Could not initialize the WASM processing core");return;}
+   if(start.cancelled)return;
+   if(!wasm.WasmProcessJob){ // compatibility only for older generated assets; never selected by current build.
+    if(!wasm.process_audio_wasm)throw new Error("WASM module does not export WasmProcessJob");
+    const {a,b,appendReverse,options}=request.payload;
+    const legacy=wasm.process_audio_wasm(a.left,a.right,b.left,b.right,appendReverse,options,(stage,fraction)=>dependencies.postMessage({type:"progress",id:request.id,event:{stage:asProgressStage(stage),fraction}}));
+    if(start.cancelled){legacy.free();return;}
+    const wav=exactBuffer(legacy.wav_bytes());
+    const metadata=metadataFromResult(legacy);
+    legacy.free();
+    dependencies.postMessage({type:"result",id:request.id,wav,metadata},[wav]);
+    return;
+   }
+   const {a,b,appendReverse,options}=request.payload;
+   const job=new wasm.WasmProcessJob(a.left,a.right,b.left,b.right,appendReverse,options);
+   // The JS channels are no longer needed after the wasm-bindgen constructor copied them.
+   request.payload.a.left=new Float32Array(0);
+   request.payload.a.right=new Float32Array(0);
+   request.payload.b.left=new Float32Array(0);
+   request.payload.b.right=new Float32Array(0);
+   if(start.cancelled){job.free();return;}
+   let session:WasmOutputSessionLike;
+   try{session=job.process((stage,fraction)=>dependencies.postMessage({type:"progress",id:request.id,event:{stage:asProgressStage(stage),fraction}}));}catch(cause){job.free();throw cause;}
+   if(start.cancelled){session.free();job.free();return;}
+   let metadata:ConvolveMetadata;
+   let header:ArrayBuffer;
+   try{metadata=metadataFromResult(session);header=exactBuffer(session.wav_header());if(header.byteLength!==WAV_HEADER_BYTES)throw new Error("WASM returned an invalid WAV header");}catch(cause){session.free();job.free();throw cause;}
+   if(start.cancelled){session.free();job.free();return;}
+   active={request,job,session,metadata,nextSequence:0,nextOffset:0};
+   dependencies.postMessage({type:"output-start",id:request.id,header,metadata},[header]);
+  }catch(cause){if(!start.cancelled)fail(request.id,cause);}finally{
+   if(starting===start)starting=undefined;
+   draining=false;
+   if(!active)void startNext();
   }
-  const {a,b,appendReverse,options}=request.payload; const job=new wasm.WasmProcessJob(a.left,a.right,b.left,b.right,appendReverse,options);
-  // The JS channels are no longer needed after the wasm-bindgen constructor copied them.
-  request.payload.a.left=new Float32Array(0); request.payload.a.right=new Float32Array(0); request.payload.b.left=new Float32Array(0); request.payload.b.right=new Float32Array(0);
-  let session:WasmOutputSessionLike; try{session=job.process((stage,fraction)=>dependencies.postMessage({type:"progress",id:request.id,event:{stage:asProgressStage(stage),fraction}}));}catch(cause){job.free();throw cause;}
-  let metadata: ConvolveMetadata; let header: ArrayBuffer; try { metadata=metadataFromResult(session); header=exactBuffer(session.wav_header()); if(header.byteLength!==WAV_HEADER_BYTES) throw new Error("WASM returned an invalid WAV header"); } catch(cause) { session.free(); job.free(); throw cause; } active={request,job,session,metadata,nextSequence:0,nextOffset:0}; dependencies.postMessage({type:"output-start",id:request.id,header,metadata},[header]);
- }catch(cause){fail(request.id,cause);}finally{draining=false;if(!active)void startNext();}};
- const finish=(state:ActiveOutput)=>{dependencies.postMessage({type:"progress",id:state.request.id,event:{stage:"encode",fraction:.97}});dependencies.postMessage({type:"progress",id:state.request.id,event:{stage:"done",fraction:1}});dependencies.postMessage({type:"result",id:state.request.id,metadata:state.metadata});cleanup(state);active=undefined;void startNext();};
- return async(request:WorkerRequest):Promise<void>=>{if(request.type==="process"){queued.push(request);await startNext();return;} if(request.type==="cancel"){if(active?.request.id===request.id){const state=active;active=undefined;cleanup(state);fail(request.id,new Error("Processing cancelled"));void startNext();}else{const index=queued.findIndex(item=>item.id===request.id);if(index>=0){queued.splice(index,1);fail(request.id,new Error("Processing cancelled"));}}return;} const state=active;if(!state||state.request.id!==request.id){return;} try{if(request.sequence!==state.nextSequence||request.offset!==state.nextOffset||request.frames<=0||request.frames>PCM24_CHUNK_FRAMES||request.frames>state.metadata.outputFrames-state.nextOffset)throw new Error("Invalid output pull sequence");const pcm=exactBuffer(state.session.pcm24_chunk(request.offset,request.frames));if(pcm.byteLength!==request.frames*6)throw new Error("WASM returned an invalid PCM chunk length");dependencies.postMessage({type:"output-chunk",id:request.id,sequence:request.sequence,offset:request.offset,frames:request.frames,pcm},[pcm]);state.nextSequence++;state.nextOffset+=request.frames;if(state.nextOffset===state.metadata.outputFrames)finish(state);}catch(cause){active=undefined;cleanup(state);fail(request.id,cause);void startNext();}};
+ }; const finish=(state:ActiveOutput)=>{dependencies.postMessage({type:"progress",id:state.request.id,event:{stage:"encode",fraction:.97}});dependencies.postMessage({type:"progress",id:state.request.id,event:{stage:"done",fraction:1}});dependencies.postMessage({type:"result",id:state.request.id,metadata:state.metadata});cleanup(state);active=undefined;void startNext();};
+ return async(request:WorkerRequest):Promise<void>=>{if(request.type==="process"){queued.push(request);await startNext();return;} if(request.type==="cancel"){if(active?.request.id===request.id){const state=active;active=undefined;cleanup(state);fail(request.id,new Error("Processing cancelled"));void startNext();}else if(starting?.request.id===request.id){starting.cancelled=true;fail(request.id,new Error("Processing cancelled"));}else{const index=queued.findIndex(item=>item.id===request.id);if(index>=0){queued.splice(index,1);fail(request.id,new Error("Processing cancelled"));}}return;} const state=active;if(!state||state.request.id!==request.id){return;} try{if(request.sequence!==state.nextSequence||request.offset!==state.nextOffset||request.frames<=0||request.frames>PCM24_CHUNK_FRAMES||request.frames>state.metadata.outputFrames-state.nextOffset)throw new Error("Invalid output pull sequence");const pcm=exactBuffer(state.session.pcm24_chunk(request.offset,request.frames));if(pcm.byteLength!==request.frames*6)throw new Error("WASM returned an invalid PCM chunk length");dependencies.postMessage({type:"output-chunk",id:request.id,sequence:request.sequence,offset:request.offset,frames:request.frames,pcm},[pcm]);state.nextSequence++;state.nextOffset+=request.frames;if(state.nextOffset===state.metadata.outputFrames)finish(state);}catch(cause){active=undefined;cleanup(state);fail(request.id,cause);void startNext();}};
 }

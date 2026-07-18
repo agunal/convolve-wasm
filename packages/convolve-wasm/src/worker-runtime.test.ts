@@ -165,4 +165,47 @@ describe("worker request runtime", () => {
   });
   it("cancels a queued request promptly and frees a job when its progress callback fails", async () => {
     const header=new Uint8Array(68);header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,6,true);const free=vi.fn();let invokeBadProgress=false;const Job=vi.fn(function(){return {free,process:(progress?: (stage:string,fraction:number)=>void)=>{if(invokeBadProgress)progress?.("not-a-stage",.5);return {sampleRate:48_000,channels:2,durationSeconds:1/48_000,outputFrames:1,detectedBeats:0,detectedBpm:undefined,beatConfidence:undefined,appliedGainDb:0,estimatedTruePeakDbtp:-1,wav_header:()=>header,pcm24_chunk:()=>new Uint8Array(6),free};}};});const posts:WorkerResponse[]=[];const handle=createWorkerRequestHandler({loadWasm:async()=>({WasmProcessJob:Job as never}),postMessage:r=>posts.push(r)});await handle(request("active"));await handle(request("queued"));await handle({type:"cancel",id:"queued"});expect(posts.at(-1)).toMatchObject({type:"error",id:"queued"});await handle({type:"cancel",id:"active"});invokeBadProgress=true;await handle(request("callback"));expect(posts.at(-1)).toMatchObject({type:"error",id:"callback"});expect(free).toHaveBeenCalled();
-  });});
+  });
+
+  it("cancels a request while WASM is loading and starts the next request after loading settles", async () => {
+    let resolveWasm!: (module: unknown) => void;
+    const loadWasm = vi.fn(() => new Promise((resolve) => { resolveWasm = resolve; }));
+    const posts: WorkerResponse[] = [];
+    const free = vi.fn();
+    const Job = vi.fn(function () {
+      return {
+        free,
+        process: () => ({
+          sampleRate: 48_000,
+          channels: 2,
+          durationSeconds: 1 / 48_000,
+          outputFrames: 1,
+          detectedBeats: 0,
+          detectedBpm: undefined,
+          beatConfidence: undefined,
+          appliedGainDb: 0,
+          estimatedTruePeakDbtp: -1,
+          wav_header: () => new Uint8Array(68),
+          pcm24_chunk: () => new Uint8Array(6),
+          free,
+        }),
+      };
+    });
+    const handle = createWorkerRequestHandler({
+      loadWasm: loadWasm as () => Promise<never>,
+      postMessage: (response) => posts.push(response),
+    });
+
+    void handle(request("cancel-during-load"));
+    await handle({ type: "cancel", id: "cancel-during-load" });
+    void handle(request("after-load"));
+    resolveWasm({ WasmProcessJob: Job });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(posts).toContainEqual(expect.objectContaining({ type: "error", id: "cancel-during-load" }));
+    expect(posts.filter((post) => post.type === "output-start").map((post) => post.id)).toEqual(["after-load"]);
+    expect(Job).toHaveBeenCalledTimes(1);
+    await handle({ type: "pull-output", id: "after-load", sequence: 0, offset: 0, frames: 1 });
+    expect(posts.at(-1)).toMatchObject({ type: "result", id: "after-load" });
+  });
+});

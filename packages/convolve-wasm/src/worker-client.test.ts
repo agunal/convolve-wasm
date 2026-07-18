@@ -70,6 +70,27 @@ const metadata = (outputFrames: number): ConvolveMetadata => ({
   estimatedTruePeakDbtp: -1,
 });
 
+const validHeader = (frames: number): Uint8Array => {
+  const header = new Uint8Array(68);
+  const view = new DataView(header.buffer);
+  header.set([82, 73, 70, 70], 0);
+  view.setUint32(4, 60 + frames * 6, true);
+  header.set([87, 65, 86, 69, 102, 109, 116, 32], 8);
+  view.setUint32(16, 40, true);
+  view.setUint16(20, 0xfffe, true);
+  view.setUint16(22, 2, true);
+  view.setUint32(24, 48_000, true);
+  view.setUint32(28, 288_000, true);
+  view.setUint16(32, 6, true);
+  view.setUint16(34, 24, true);
+  view.setUint16(36, 22, true);
+  view.setUint16(38, 24, true);
+  view.setUint32(40, 3, true);
+  header.set([1, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113], 44);
+  header.set([100, 97, 116, 97], 60);
+  view.setUint32(64, frames * 6, true);
+  return header;
+};
 const decodedPair = (): DecodedInputPair => ({
   a: {
     sampleRate: 48_000,
@@ -197,12 +218,12 @@ describe("WorkerClient", () => {
   });
 
   it("assembles ordered PCM chunks into an audio/wav Blob and pulls one chunk at a time", async () => {
-    const worker=new FakeWorker(); const client=new WorkerClient(()=>worker); const promise=client.process(decodedPair(),false,normalizeOptions()); const id=worker.posts[0]!.message.id; const header=new Uint8Array(68); header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,18,true);
+    const worker=new FakeWorker(); const client=new WorkerClient(()=>worker); const promise=client.process(decodedPair(),false,normalizeOptions()); const id=worker.posts[0]!.message.id; const header=validHeader(3);
     worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(3)}); expect(worker.posts.at(-1)?.message).toMatchObject({type:"pull-output",id,sequence:0,offset:0,frames:3}); const pcm=Uint8Array.from({length:18},(_,index)=>index); worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:3,pcm:pcm.buffer}); worker.emitMessage({type:"result",id,metadata:metadata(3)});
     const result=await promise; expect(result.wav.type).toBe("audio/wav"); expect(Array.from(new Uint8Array(await result.wav.arrayBuffer()))).toEqual([...header,...pcm]);
   });
   it("rejects malformed, duplicate, and stale output without retaining a partial Blob", async () => {
-    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const header=new Uint8Array(68);header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,12,true);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:1,frames:1,pcm:new Uint8Array(6).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});expect(worker.posts.at(-1)?.message).toMatchObject({type:"cancel",id});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});
+    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const header=validHeader(2);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:1,frames:1,pcm:new Uint8Array(6).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});expect(worker.posts.at(-1)?.message).toMatchObject({type:"cancel",id});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});
   });
 
   it("recreates a worker after a fatal failure and accepts a subsequent request", async () => {
@@ -213,16 +234,88 @@ describe("WorkerClient", () => {
     ["wrong PCM byte length", { sequence: 0, offset: 0, frames: 1, bytes: 5 }],
     ["wrong frames", { sequence: 0, offset: 0, frames: 0, bytes: 0 }],
   ])("rejects a %s sequence/length violation", async (_name, bad) => {
-    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const header=new Uint8Array(68);header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,12,true);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:bad.sequence,offset:bad.offset,frames:bad.frames,pcm:new Uint8Array(bad.bytes).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
+    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const header=validHeader(2);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:bad.sequence,offset:bad.offset,frames:bad.frames,pcm:new Uint8Array(bad.bytes).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
   });
 
   it("does not issue the second pull until the first chunk arrives, and rejects premature totals", async () => {
-    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const frames=65_537;const header=new Uint8Array(68);header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,frames*6,true);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(frames)});expect(worker.posts.filter(post=>post.message.type==="pull-output")).toHaveLength(1);worker.emitMessage({type:"result",id,metadata:metadata(frames)});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
+    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts[0]!.message.id;const frames=65_537;const header=validHeader(frames);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(frames)});expect(worker.posts.filter(post=>post.message.type==="pull-output")).toHaveLength(1);worker.emitMessage({type:"result",id,metadata:metadata(frames)});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
   });
 
   it("cancels and discards output when a progress callback throws, then handles a later request", async () => {
     const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const failed=client.process(decodedPair(),false,{...normalizeOptions(),onProgress:()=>{throw new Error("observer failed");}});const id=worker.posts[0]!.message.id;worker.emitMessage({type:"progress",id,event:{stage:"validate",fraction:.3}});await expect(failed).rejects.toThrow("observer failed");expect(worker.posts.at(-1)?.message).toMatchObject({type:"cancel",id});const next=client.process(decodedPair(),false,normalizeOptions());const nextId=worker.posts.at(-1)!.message.id;worker.emitMessage({type:"result",id:nextId,wav:new Uint8Array([82,73,70,70]).buffer,metadata:metadata(1)});await expect(next).resolves.toMatchObject({metadata:{outputFrames:1}});
   });
   it("rejects duplicate chunks and output-start metadata/header disagreement", async () => {
-    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const malformed=client.process(decodedPair(),false,normalizeOptions());const malformedId=worker.posts[0]!.message.id;const mismatch=new Uint8Array(68);mismatch.set([82,73,70,70],0);mismatch.set([87,65,86,69],8);mismatch.set([100,97,116,97],60);new DataView(mismatch.buffer).setUint32(64,6,true);worker.emitMessage({type:"output-start",id:malformedId,header:mismatch.buffer,metadata:metadata(2)});await expect(malformed).rejects.toMatchObject({code:"PROCESSING_FAILED"});const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts.at(-1)!.message.id;const header=new Uint8Array(68);header.set([82,73,70,70],0);header.set([87,65,86,69],8);header.set([100,97,116,97],60);new DataView(header.buffer).setUint32(64,12,true);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
-  });});
+    const worker=new FakeWorker();const client=new WorkerClient(()=>worker);const malformed=client.process(decodedPair(),false,normalizeOptions());const malformedId=worker.posts[0]!.message.id;const mismatch=validHeader(1);worker.emitMessage({type:"output-start",id:malformedId,header:mismatch.buffer,metadata:metadata(2)});await expect(malformed).rejects.toMatchObject({code:"PROCESSING_FAILED"});const promise=client.process(decodedPair(),false,normalizeOptions());const id=worker.posts.at(-1)!.message.id;const header=validHeader(2);worker.emitMessage({type:"output-start",id,header:header.buffer,metadata:metadata(2)});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});worker.emitMessage({type:"output-chunk",id,sequence:0,offset:0,frames:1,pcm:new Uint8Array(6).buffer});await expect(promise).rejects.toMatchObject({code:"PROCESSING_FAILED"});
+  });
+
+  it("keeps a replacement worker request alive when the old worker emits a late error", async () => {
+    const first = new FakeWorker();
+    const second = new FakeWorker();
+    const factory = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const client = new WorkerClient(factory);
+    const failed = client.process(decodedPair(), false, normalizeOptions());
+    first.emitError("first fatal");
+    await expect(failed).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+
+    const next = client.process(decodedPair(), false, normalizeOptions());
+    const nextId = second.posts[0]!.message.id;
+    first.emitError("late old-worker error");
+    second.emitMessage({ type: "result", id: nextId, wav: new Uint8Array([82, 73, 70, 70]).buffer, metadata: metadata(1) });
+
+    await expect(next).resolves.toMatchObject({ metadata: { outputFrames: 1 } });
+  });
+
+  it.each([
+    ["RIFF size", (header: Uint8Array) => new DataView(header.buffer).setUint32(4, 0, true)],
+    ["fmt marker", (header: Uint8Array) => header.set([66, 65, 68, 33], 12)],
+    ["fmt size", (header: Uint8Array) => new DataView(header.buffer).setUint32(16, 16, true)],
+    ["format tag", (header: Uint8Array) => new DataView(header.buffer).setUint16(20, 1, true)],
+    ["channel count", (header: Uint8Array) => new DataView(header.buffer).setUint16(22, 1, true)],
+    ["sample rate", (header: Uint8Array) => new DataView(header.buffer).setUint32(24, 44_100, true)],
+    ["byte rate", (header: Uint8Array) => new DataView(header.buffer).setUint32(28, 1, true)],
+    ["block alignment", (header: Uint8Array) => new DataView(header.buffer).setUint16(32, 1, true)],
+    ["bits per sample", (header: Uint8Array) => new DataView(header.buffer).setUint16(34, 16, true)],
+    ["extension size", (header: Uint8Array) => new DataView(header.buffer).setUint16(36, 0, true)],
+    ["valid bits", (header: Uint8Array) => new DataView(header.buffer).setUint16(38, 16, true)],
+    ["channel mask", (header: Uint8Array) => new DataView(header.buffer).setUint32(40, 0, true)],
+    ["PCM GUID", (header: Uint8Array) => header[44] = 0],
+    ["data marker", (header: Uint8Array) => header.set([66, 65, 68, 33], 60)],
+    ["data size", (header: Uint8Array) => new DataView(header.buffer).setUint32(64, 0, true)],
+  ])("rejects an output-start header with an invalid %s", async (_name, mutate) => {
+    const worker = new FakeWorker();
+    const client = new WorkerClient(() => worker);
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    const header = validHeader(1);
+    mutate(header);
+
+    worker.emitMessage({ type: "output-start", id, header: header.buffer, metadata: metadata(1) });
+
+    await expect(pending).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+    expect(worker.posts.at(-1)?.message).toMatchObject({ type: "cancel", id });
+  });
+
+  it.each([
+    ["wrong sample rate", (value: ConvolveMetadata) => ({ ...value, sampleRate: 44_100 })],
+    ["wrong channel count", (value: ConvolveMetadata) => ({ ...value, channels: 1 })],
+    ["zero frame count", (value: ConvolveMetadata) => ({ ...value, outputFrames: 0 })],
+    ["inconsistent duration", (value: ConvolveMetadata) => ({ ...value, durationSeconds: 1 })],
+    ["non-finite duration", (value: ConvolveMetadata) => ({ ...value, durationSeconds: Number.NaN })],
+    ["non-integral frame count", (value: ConvolveMetadata) => ({ ...value, outputFrames: 1.5 })],
+    ["negative beat count", (value: ConvolveMetadata) => ({ ...value, detectedBeats: -1 })],
+    ["non-finite BPM", (value: ConvolveMetadata) => ({ ...value, detectedBpm: Number.NaN })],
+    ["non-finite confidence", (value: ConvolveMetadata) => ({ ...value, beatConfidence: Number.POSITIVE_INFINITY })],
+    ["non-finite gain", (value: ConvolveMetadata) => ({ ...value, appliedGainDb: Number.NaN })],
+    ["non-finite true peak", (value: ConvolveMetadata) => ({ ...value, estimatedTruePeakDbtp: Number.NEGATIVE_INFINITY })],
+  ])("rejects output-start metadata with %s", async (_name, mutate) => {
+    const worker = new FakeWorker();
+    const client = new WorkerClient(() => worker);
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+
+    worker.emitMessage({ type: "output-start", id, header: validHeader(1).buffer, metadata: mutate(metadata(1)) });
+
+    await expect(pending).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+    expect(worker.posts.at(-1)?.message).toMatchObject({ type: "cancel", id });
+  });
+});
