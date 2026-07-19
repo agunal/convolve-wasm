@@ -1,4 +1,7 @@
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "windows", target_os = "linux")
+))]
 
 mod golden_fixtures;
 

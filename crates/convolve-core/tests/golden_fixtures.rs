@@ -95,7 +95,7 @@ pub struct ExpectedGolden {
     pub estimated_true_peak_dbtp_bits: u32,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 pub const fn expected(mode: GoldenMode) -> ExpectedGolden {
     match mode {
         GoldenMode::Plain => ExpectedGolden {
@@ -136,6 +136,54 @@ pub const fn expected(mode: GoldenMode) -> ExpectedGolden {
             detected_bpm_bits: Some(1_122_983_065),
             beat_confidence_bits: Some(1_059_500_588),
             applied_gain_db_bits: 3_239_862_916,
+            estimated_true_peak_dbtp_bits: 3_217_031_174,
+        },
+    }
+}
+
+// Native libm and FFT execution are platform-specific. The published browser contract uses the
+// target-independent generated-WASM goldens below; these values freeze the Linux CI baseline.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
+pub const fn expected(mode: GoldenMode) -> ExpectedGolden {
+    match mode {
+        GoldenMode::Plain => ExpectedGolden {
+            wav_sha256: "8170684b5df2c306c0ada3e0664f70fe3c6e3cc551c2c999332f46802eb79e80",
+            output_frames: 96_512,
+            detected_beats: 0,
+            duration_seconds_bits: 4_611_710_037_625_400_547,
+            detected_bpm_bits: None,
+            beat_confidence_bits: None,
+            applied_gain_db_bits: 3_249_300_948,
+            estimated_true_peak_dbtp_bits: 3_217_031_168,
+        },
+        GoldenMode::Reverse => ExpectedGolden {
+            wav_sha256: "fdda1356618f9e1366f0fac46bd71a95abad9ab4e91cc2d3ad15def70fbf15b7",
+            output_frames: 192_688,
+            detected_beats: 0,
+            duration_seconds_bits: 4_616_205_755_953_423_144,
+            detected_bpm_bits: None,
+            beat_confidence_bits: None,
+            applied_gain_db_bits: 3_249_300_948,
+            estimated_true_peak_dbtp_bits: 3_217_031_168,
+        },
+        GoldenMode::BeatPan => ExpectedGolden {
+            wav_sha256: "7008f550d3cdc99c9130effc5c9ba6429ce38d31bf375567cd6242d8aa64c66f",
+            output_frames: 96_512,
+            detected_beats: 5,
+            duration_seconds_bits: 4_611_710_037_625_400_547,
+            detected_bpm_bits: Some(1_122_983_065),
+            beat_confidence_bits: Some(1_059_500_589),
+            applied_gain_db_bits: 3_239_862_915,
+            estimated_true_peak_dbtp_bits: 3_217_031_174,
+        },
+        GoldenMode::BeatPanReverse => ExpectedGolden {
+            wav_sha256: "9bb7cc6bba2083a6757deebc0aa236765f88031eb154a82e0feb7987dd252e98",
+            output_frames: 192_688,
+            detected_beats: 5,
+            duration_seconds_bits: 4_616_205_755_953_423_144,
+            detected_bpm_bits: Some(1_122_983_065),
+            beat_confidence_bits: Some(1_059_500_589),
+            applied_gain_db_bits: 3_239_862_915,
             estimated_true_peak_dbtp_bits: 3_217_031_174,
         },
     }
