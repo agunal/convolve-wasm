@@ -159,6 +159,119 @@ describe("WorkerClient", () => {
     ]);
   });
 
+  it("drops hostile diagnostic packets without changing a valid result", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    const hostilePacket = { type: "diagnostic", id };
+    Object.defineProperty(hostilePacket, "event", {
+      get() {
+        throw new Error("SECRET_EVENT_GETTER");
+      },
+    });
+    const hostileEvent = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error("SECRET_EVENT_PROXY");
+        },
+      },
+    );
+
+    worker.emitMessage(hostilePacket as unknown as WorkerResponse);
+    worker.emitMessage({ type: "diagnostic", id, event: hostileEvent } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+
+    const result = await pending;
+    expect(result.metadata).toEqual(metadata(1));
+    expect(Array.from(new Uint8Array(await result.wav.arrayBuffer()))).toEqual([
+      82, 73, 70, 70,
+    ]);
+    expect(diagnostics).toEqual([{ type: "worker-created" }]);
+  });
+
+  it("reconstructs worker diagnostics from allowlisted own data only", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+
+    worker.emitMessage({
+      type: "diagnostic",
+      id,
+      event: {
+        type: "wasm-init-start",
+        stack: "SECRET_STACK",
+        binary: new Uint8Array([83, 69, 67, 82, 69, 84]),
+        private: "SECRET_PRIVATE",
+      },
+    } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "diagnostic",
+      id,
+      event: {
+        type: "wasm-init-failure",
+        error: {
+          name: "Error",
+          message: "failed core.wasm C:\\private\\take.wav",
+          stack: "SECRET_ERROR_STACK",
+          binary: new Uint8Array([1, 2, 3]),
+          unknown: "SECRET_UNKNOWN",
+        },
+        stack: "SECRET_EVENT_STACK",
+        unknown: "SECRET_EVENT_UNKNOWN",
+      },
+    } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      metadata: { outputFrames: 1 },
+    });
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      { type: "wasm-init-start" },
+      {
+        type: "wasm-init-failure",
+        error: {
+          name: "Error",
+          message: "failed [redacted-file-name] [redacted-path]",
+        },
+      },
+    ]);
+    const json = JSON.stringify(diagnostics);
+    for (const secret of [
+      "core.wasm",
+      "take.wav",
+      "SECRET_STACK",
+      "SECRET_PRIVATE",
+      "SECRET_UNKNOWN",
+      "SECRET_EVENT",
+      "binary",
+      "unknown",
+    ]) {
+      expect(json).not.toContain(secret);
+    }
+  });
+
   it("rejects message errors and succeeds with a replacement worker", async () => {
     const first = new FakeWorker();
     const second = new FakeWorker();

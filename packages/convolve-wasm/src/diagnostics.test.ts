@@ -77,6 +77,53 @@ describe("private diagnostic events", () => {
     expect(() => safeDiagnosticError(revoked.proxy)).not.toThrow();
     expect(safeDiagnosticError(revoked.proxy)).toEqual({ message: "" });
   });
+  it("does not invoke throwing own accessors while sanitizing errors", () => {
+    let getterInvoked = false;
+    const hostile = {};
+    Object.defineProperty(hostile, "message", {
+      get() {
+        getterInvoked = true;
+        throw new Error("SECRET_GETTER");
+      },
+    });
+
+    expect(() => safeDiagnosticError(hostile)).not.toThrow();
+    expect(safeDiagnosticError(hostile)).toEqual({ message: "" });
+    expect(getterInvoked).toBe(false);
+  });
+
+  it("does not throw when a Proxy traps own-property inspection", () => {
+    const hostile = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error("SECRET_DESCRIPTOR_TRAP");
+        },
+      },
+    );
+
+    expect(() => safeDiagnosticError(hostile)).not.toThrow();
+    expect(safeDiagnosticError(hostile)).toEqual({ message: "" });
+  });
+
+  it("redacts arbitrary filename tokens from diagnostic free text", () => {
+    const value = safeDiagnosticError({
+      message:
+        "failed core.wasm while reading report.json from worker.js and take.mp3",
+      stack: "SECRET_STACK",
+    });
+    const json = JSON.stringify(value);
+
+    for (const secret of [
+      "core.wasm",
+      "report.json",
+      "worker.js",
+      "take.mp3",
+      "SECRET_STACK",
+    ]) {
+      expect(json).not.toContain(secret);
+    }
+  });
   it("uses only the private event union", () => {
     const event: ConvolveDiagnosticEvent = {
       type: "memory-plan",

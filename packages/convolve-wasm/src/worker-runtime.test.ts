@@ -106,6 +106,76 @@ describe("worker request runtime", () => {
     ]);
   });
 
+  it("keeps progress, result, metadata, and cleanup unchanged when only diagnostic delivery throws", async () => {
+    const free = vi.fn();
+    const posts: WorkerResponse[] = [];
+    const handle = createWorkerRequestHandler({
+      loadWasm: async () => ({
+        process_audio_wasm: (
+          _aLeft: Float32Array,
+          _aRight: Float32Array,
+          _bLeft: Float32Array,
+          _bRight: Float32Array,
+          _appendReverse: boolean,
+          _options: unknown,
+          progress?: (stage: string, fraction: number) => void,
+        ) => {
+          progress?.("validate", 0.3);
+          return {
+            sampleRate: 48_000,
+            channels: 2,
+            durationSeconds: 1 / 48_000,
+            outputFrames: 1,
+            detectedBeats: 0,
+            detectedBpm: undefined,
+            beatConfidence: undefined,
+            appliedGainDb: 0,
+            estimatedTruePeakDbtp: -1,
+            wav_bytes: () => Uint8Array.from([82, 73, 70, 70]),
+            free,
+          };
+        },
+      }),
+      postMessage: (response) => {
+        if (response.type === "diagnostic") {
+          throw new Error("diagnostic delivery failed");
+        }
+        posts.push(response);
+      },
+    });
+
+    await expect(handle(request("diagnostic-failure"))).resolves.toBeUndefined();
+    expect(posts).toEqual([
+      {
+        type: "progress",
+        id: "diagnostic-failure",
+        event: { stage: "load-wasm", fraction: 0.25 },
+      },
+      {
+        type: "progress",
+        id: "diagnostic-failure",
+        event: { stage: "validate", fraction: 0.3 },
+      },
+      {
+        type: "result",
+        id: "diagnostic-failure",
+        wav: expect.any(ArrayBuffer),
+        metadata: {
+          sampleRate: 48_000,
+          channels: 2,
+          durationSeconds: 1 / 48_000,
+          outputFrames: 1,
+          detectedBeats: 0,
+          detectedBpm: null,
+          beatConfidence: null,
+          appliedGainDb: 0,
+          estimatedTruePeakDbtp: -1,
+        },
+      },
+    ]);
+    expect(free).toHaveBeenCalledOnce();
+  });
+
   it("preserves structured processing failures and classifies init failures", async () => {
     const structuredPosts: WorkerResponse[] = [];
     const structured = createWorkerRequestHandler({

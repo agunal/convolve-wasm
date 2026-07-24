@@ -264,6 +264,57 @@ describe("Web Audio decoding", () => {
     });
     expect(JSON.stringify(diagnostics)).not.toContain("private.example");
   });
+
+  it("emits only safe allowlisted MIME essences", async () => {
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const backend = {
+      async decode() {
+        return {
+          sampleRate: 48_000 as const,
+          frames: 1,
+          left: new Float32Array([1]),
+          right: new Float32Array([1]),
+        };
+      },
+    };
+
+    await decodeInputPair(
+      {
+        a: new File([new Uint8Array([1])], "private-a.wav", {
+          type: "audio/wav;name=private-take.wav",
+        }),
+        b: new File([new Uint8Array([2])], "private-b.m4a", {
+          type: "private-take.wav/audio",
+        }),
+      },
+      backend,
+      undefined,
+      (event) => diagnostics.push(event),
+    );
+
+    expect(
+      diagnostics.filter(
+        (event): event is Extract<
+          ConvolveDiagnosticEvent,
+          { type: "decode-start" }
+        > => event.type === "decode-start",
+      ),
+    ).toEqual([
+      {
+        type: "decode-start",
+        slot: "a",
+        mimeType: "audio/wav",
+        encodedBytes: 1,
+      },
+      {
+        type: "decode-start",
+        slot: "b",
+        mimeType: "",
+        encodedBytes: 1,
+      },
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("private-take.wav");
+  });
   it("does not double-wrap typed decoding errors", async () => {
     const typed = new ConvolveError("UNSUPPORTED_CHANNEL_COUNT", "too many");
     const backend = makeBackend(Promise.reject(typed));

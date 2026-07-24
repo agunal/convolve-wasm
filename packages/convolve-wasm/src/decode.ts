@@ -23,7 +23,14 @@ export type DecodedInputPair = {
 };
 
 const SUPPORTED_EXTENSIONS = new Set([".wav", ".m4a"]);
-const DIAGNOSTIC_MIME_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:\s*;\s*[A-Za-z0-9!#$&^_.+-]+=[A-Za-z0-9!#$&^_.+-]+)*$/u;
+const DIAGNOSTIC_MIME_TYPES = new Set([
+  "audio/mp4",
+  "audio/vnd.wave",
+  "audio/wav",
+  "audio/wave",
+  "audio/x-m4a",
+  "audio/x-wav",
+]);
 
 export function validateSupportedExtension(fileName: string): void {
   const dot = fileName.lastIndexOf(".");
@@ -116,11 +123,13 @@ export function getDefaultDecodeBackend(): WebAudioDecodeBackend {
 }
 
 function diagnosticMimeType(value: string): string {
-  const text = value
+  const essence = value
     .slice(0, 120)
+    .split(";", 1)[0]!
     .replace(/[\u0000-\u001f\u007f]/gu, " ")
-    .trim();
-  return DIAGNOSTIC_MIME_TYPE.test(text) ? text : "";
+    .trim()
+    .toLowerCase();
+  return DIAGNOSTIC_MIME_TYPES.has(essence) ? essence : "";
 }
 async function decodeInput(
   slot: "a" | "b",

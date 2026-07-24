@@ -14,6 +14,7 @@ import type {
 import {
   PCM24_CHUNK_FRAMES,
   WAV_HEADER_BYTES,
+  type WorkerDiagnosticEvent,
   type WorkerProcessOptions,
   type WorkerRequest,
   type WorkerResponse,
@@ -197,6 +198,46 @@ function validateHeader(header: ArrayBuffer, frames: number): void {
   }
 }
 
+const MISSING_OWN_DATA = Symbol("missing own data");
+
+function ownData(
+  value: unknown,
+  key: string,
+): unknown | typeof MISSING_OWN_DATA {
+  if (typeof value !== "object" || value === null) return MISSING_OWN_DATA;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && "value" in descriptor
+      ? descriptor.value
+      : MISSING_OWN_DATA;
+  } catch {
+    return MISSING_OWN_DATA;
+  }
+}
+
+function reconstructWorkerDiagnostic(
+  value: unknown,
+): WorkerDiagnosticEvent | undefined {
+  try {
+    switch (ownData(value, "type")) {
+      case "wasm-init-start":
+        return { type: "wasm-init-start" };
+      case "wasm-init-success":
+        return { type: "wasm-init-success" };
+      case "wasm-init-failure": {
+        const error = ownData(value, "error");
+        return error === MISSING_OWN_DATA
+          ? undefined
+          : { type: "wasm-init-failure", error: safeDiagnosticError(error) };
+      }
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export class WorkerClient {
   private worker: WorkerLike | undefined;
   private nextRequestId = 1;
@@ -325,40 +366,67 @@ export class WorkerClient {
     }
   }
 
-  private handleMessage(response: WorkerResponse): void {
-    const pending = this.pending.get(response.id);
+  private handleMessage(value: unknown): void {
+    const type = ownData(value, "type");
+    const id = ownData(value, "id");
+    if (typeof id !== "string") return;
+
+    const pending = this.pending.get(id);
     if (!pending) return;
 
+    if (type === "diagnostic") {
+      const event = reconstructWorkerDiagnostic(ownData(value, "event"));
+      if (event) notifyDiagnostic(this.diagnostics, event);
+      return;
+    }
+
+    const response = value as WorkerResponse;
     try {
-      switch (response.type) {
-        case "diagnostic":
-          notifyDiagnostic(this.diagnostics, response.event);
-          break;
+      switch (type) {
         case "progress":
-          pending.onProgress?.(response.event);
+          pending.onProgress?.(
+            (response as Extract<WorkerResponse, { type: "progress" }>).event,
+          );
           break;
-        case "error":
+        case "error": {
+          const errorResponse = response as Extract<
+            WorkerResponse,
+            { type: "error" }
+          >;
           this.fail(
-            response.id,
+            id,
             new ConvolveError(
-              response.error.code,
-              response.error.message,
-              response.error.details,
+              errorResponse.error.code,
+              errorResponse.error.message,
+              errorResponse.error.details,
             ),
           );
           break;
+        }
         case "output-start":
-          this.handleOutputStart(response.id, pending, response);
+          this.handleOutputStart(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "output-start" }>,
+          );
           break;
         case "output-chunk":
-          this.handleOutputChunk(response.id, pending, response);
+          this.handleOutputChunk(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "output-chunk" }>,
+          );
           break;
         case "result":
-          this.handleResult(response.id, pending, response);
+          this.handleResult(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "result" }>,
+          );
           break;
       }
     } catch (cause) {
-      this.fail(response.id, cause);
+      this.fail(id, cause);
     }
   }
 
