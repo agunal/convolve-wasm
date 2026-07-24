@@ -38,6 +38,7 @@ import {
 import {
   sanitizeCheckpointDetails,
   sanitizeEnvironmentText,
+  sanitizePlatformText,
   sanitizeError,
 } from "./sanitize";
 
@@ -607,7 +608,7 @@ function browserEnvironment(clipboard: boolean): DiagnosticEnvironment {
   const legacyPlatform = field(navigatorValue, "platform");
   return {
     userAgent: sanitizeEnvironmentText(field(navigatorValue, "userAgent")),
-    platform: sanitizeEnvironmentText(
+    platform: sanitizePlatformText(
       typeof modernPlatform === "string" ? modernPlatform : legacyPlatform,
     ),
     deviceMemoryGiB: positive(field(navigatorValue, "deviceMemory")),

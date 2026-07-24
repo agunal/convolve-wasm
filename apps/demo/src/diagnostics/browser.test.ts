@@ -371,6 +371,29 @@ describe("browser diagnostics", () => {
       ],
     });
   });
+  it("never retains generic filename sentinels from processing and browser incidents", () => {
+    const storage = new BrowserStorage();
+    const recorder = actualRecorder(storage);
+    const dependencies = browserDependencies(recorder);
+    const diagnostics = createBrowserDiagnostics(dependencies);
+    const sentinels = ["private.mp3", "private.flac", "private.pdf", "private.7z"];
+
+    diagnostics.startAttempt(validAttempt());
+    diagnostics.handleWindowError({ message: `window ${sentinels[0]}` });
+    diagnostics.handleUnhandledRejection({ reason: { message: `promise ${sentinels[1]}` } });
+    diagnostics.handlePackageEvent({ type: "worker-error", error: { message: `package ${sentinels[2]}` } });
+    dependencies.previewTarget.error = { message: `audio ${sentinels[3]}` };
+    dependencies.previewTarget.dispatchEvent(new Event("error"));
+    diagnostics.finishFailure({ message: `processing ${sentinels[2]}` });
+
+    const raw = storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "";
+    const exported = recorder.exportJson();
+    for (const sentinel of sentinels) {
+      expect(raw).not.toContain(sentinel);
+      expect(exported).not.toContain(sentinel);
+    }
+  });
+
   it("captures window and promise errors without preventing defaults", () => {
     const recorder = fakeRecorder();
     const diagnostics = createBrowserDiagnostics(

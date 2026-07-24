@@ -21,6 +21,7 @@ Checkpoint updates are persisted incrementally with the active marker. On a late
 ## What unexpected termination means
 
 On the next load, an active marker whose session lacks a terminal completion or clean-shutdown checkpoint is labeled `unexpected-termination`. This proves only that the previous JavaScript session did not save a normal completion or shutdown boundary. It does not prove an out-of-memory event, browser crash, exact kill instant, or Chrome renderer/system reason.
+If recovery has only the active marker and no retained session, the export explicitly states that detailed checkpoints were unavailable.
 
 A clean navigation can save a `pagehide`/clean-shutdown boundary, but termination can prevent JavaScript from running that cleanup. The label is deliberately an inference, not a crash classifier.
 

@@ -39,6 +39,12 @@ describe("diagnostic privacy filtering", () => {
 
     expect(sanitizeEnvironmentText(userAgent)).toBe(userAgent);
   });
+  it("keeps user agents at their 512-character policy while capping platform text at 120", () => {
+    const platform = `Android ${"x".repeat(200)}`;
+    expect(sanitizerModule.sanitizeEnvironmentText("Mozilla/5.0")).toBe("Mozilla/5.0");
+    expect(sanitizerModule.sanitizePlatformText(platform)).toHaveLength(120);
+  });
+
   it.each([
     ["HTTPS URL", "Chrome/126 https://private.example/PRIVATE_HTTP", "PRIVATE_HTTP"],
     ["Blob URL", "Chrome/126 blob:https://private.example/PRIVATE_BLOB", "PRIVATE_BLOB"],
@@ -67,6 +73,21 @@ describe("diagnostic privacy filtering", () => {
     expect(output).toContain(input.match(/^[A-Za-z]+(?:\/\d+)?/u)?.[0]);
     expect(output).not.toContain(sentinel);
     expect(output.length).toBeLessThanOrEqual(512);
+  });
+
+  it.each(["private-recording.mp3", "private-recording.flac", "private-recording.pdf", "private-recording.7z"])(
+    "redacts generic filename %s from sensitive and environment text",
+    (filename) => {
+      expect(sanitizeSensitiveText(`failed ${filename}`)).not.toContain(filename);
+      const sanitizeEnvironmentText = sanitizerModule.sanitizeEnvironmentText;
+      expect(sanitizeEnvironmentText(`Platform ${filename}`)).not.toContain(filename);
+    },
+  );
+
+  it("rejects MIME parameters at the schema-v1 persistence boundary", () => {
+    expect(sanitizeCheckpointDetails("input", {
+      slot: "a", mimeType: "audio/wav;name=private-recording.wav", encodedBytes: 1,
+    })).toEqual({ slot: "a", encodedBytes: 1 });
   });
 
   it.each([

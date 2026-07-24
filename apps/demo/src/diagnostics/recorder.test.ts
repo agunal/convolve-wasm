@@ -81,6 +81,20 @@ class ToggleQuotaStorage extends FakeStorage {
 }
 
 describe("DiagnosticRecorder", () => {
+class ToggleFailureStorage extends FakeStorage {
+  setFailure: "SecurityError" | "QuotaExceededError" | null = null;
+
+  constructor() {
+    super({ unrelated: "keep" });
+  }
+
+  override setItem(key: string, value: string): void {
+    this.operations.push(`set:${key}`);
+    if (this.setFailure) throw domError(this.setFailure);
+    this.values.set(key, value);
+  }
+}
+
   it("writes the retained session before its active marker", () => {
     const storage = new FakeStorage();
     const recorder = makeRecorder(storage);
@@ -597,11 +611,22 @@ describe("DiagnosticRecorder", () => {
     },
   );
 
-  it("does not infer when an active-status record already has a terminal checkpoint", () => {
-    const recorder = makeRecorder(seedActiveSession({ status: "active", terminal: true }));
-    expect(recorder.snapshot().sessions[0]?.status).toBe("active");
-    expect(recorder.snapshot().recoveredSessionId).toBeNull();
-  });
+  it.each(["window", "promise"] as const)(
+    "recovers an active session after an incidental %s error checkpoint",
+    (errorSource) => {
+      const storage = seedActiveSession({ status: "active", terminal: true });
+      const raw = JSON.parse(storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "{}") as DiagnosticStore;
+      raw.sessions[0]!.checkpoints[0] = {
+        ...raw.sessions[0]!.checkpoints[0]!, type: "error", details: { source: errorSource },
+      };
+      storage.setItem(DIAGNOSTIC_STORE_KEY, JSON.stringify(raw));
+      const recorder = makeRecorder(storage);
+      expect(recorder.snapshot()).toMatchObject({ recoveredSessionId: "unfinished" });
+      expect(recorder.snapshot().sessions[0]).toMatchObject({
+        status: "unexpected-termination", inference: { markerOnly: false },
+      });
+    },
+  );
 
   it("creates an explicitly limited marker-only inference after ring corruption", () => {
     const storage = seedMarkerWithCorruptRing();
@@ -611,7 +636,7 @@ describe("DiagnosticRecorder", () => {
       inference: { markerOnly: true },
     });
     expect(recorder.snapshot().sessions[0]?.inference?.statement.toLowerCase())
-      .toContain("does not establish out-of-memory or any exact cause");
+      .toContain("detailed checkpoints were unavailable");
     expect(storage.operations.slice(-3)).toEqual([
       `remove:${DIAGNOSTIC_STORE_KEY}`,
       `set:${DIAGNOSTIC_STORE_KEY}`,
@@ -691,6 +716,25 @@ describe("DiagnosticRecorder", () => {
     expect(storage.getItem("unrelated")).toBe("keep");
     expect(recorder.snapshot().sessions).toEqual([]);
   });
+
+  it.each(["QuotaExceededError", "SecurityError"] as const)(
+    "reacquires storage and clears both owned keys after transient %s degradation",
+    (failure) => {
+      const storage = new ToggleFailureStorage();
+      const recorder = makeRecorder(() => storage);
+      recorder.startSession(startInput("clear-after-degradation"));
+      storage.setFailure = failure;
+      recorder.checkpoint("worker-created", {});
+      storage.setFailure = null;
+      expect(() => recorder.clear()).not.toThrow();
+      expect(storage.getItem(DIAGNOSTIC_STORE_KEY)).toBeNull();
+      expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).toBeNull();
+      expect(storage.getItem("unrelated")).toBe("keep");
+      const reloaded = makeRecorder(() => storage);
+      reloaded.startSession(startInput("after-clear"));
+      expect(reloaded.snapshot().activeSessionId).toBe("after-clear");
+    },
+  );
 
   it("allows a subsequent successful operation after every diagnostic write fails", () => {
     const recorder = makeRecorder(alwaysThrowingStorage());

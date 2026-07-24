@@ -8,7 +8,7 @@ const MAX_ERROR_TEXT = 512;
 const MAX_ENVIRONMENT_TEXT = 512;
 const MAX_INPUT_TEXT = 4_096;
 const MAX_SHORT_TEXT = 120;
-const AUDIO_NAME = /(?:["'][^"'<>\r\n]+\.(?:wav|m4a)["'])|(?:^|[\s("'=])(?:[^\s"'<>\\/:]+(?:[ \t]+[^\s"'<>\\/:]+)*)\.(?:wav|m4a)\b/giu;
+const FILE_NAME = /(?:["'][^"'<>\r\n]+\.[A-Za-z0-9]{1,16}["'])|(?:^|[\s("'=])(?:[^\s"'<>\\/:]+(?:[ \t]+[^\s"'<>\\/:]+)*)\.(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,16}\b/giu;
 const BLOB_URL = /\bblob:[^\s"'<>]+/giu;
 const HTTP_URL = /\bhttps?:\/\/[^\s"'<>]+/giu;
 const SOURCE_URL = /\b[A-Za-z][A-Za-z0-9+.-]*:(?=[^\s"'<>])[^\s"'<>]*/gu;
@@ -43,7 +43,7 @@ const ERROR_DETAIL_KEYS = [
 const ERROR_SOURCES = new Set([
   "decode", "worker", "window", "promise", "audio", "processing", "wasm",
 ]);
-const MIME_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:\s*;\s*[A-Za-z0-9!#$&^_.+-]+=[A-Za-z0-9!#$&^_.+-]+)*$/u;
+const MIME_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u;
 const STAGES = new Set([
   "decode-a", "decode-b", "load-wasm", "validate", "convolve", "beat-detect",
   "beat-pan", "append-reverse", "normalize", "encode", "done",
@@ -62,7 +62,7 @@ export function sanitizeSensitiveText(value: unknown): string {
     .replace(RELATIVE_PATH, "$1[redacted-path]")
     .replace(SEPARATOR_PATH, "$1[redacted-path]")
     .replace(POSIX_PATH, "$1[redacted-path]")
-    .replace(AUDIO_NAME, "[redacted-audio-name]")
+    .replace(FILE_NAME, "[redacted-file-name]")
     .replace(/[\u0000-\u001f\u007f]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim()
@@ -86,11 +86,15 @@ export function sanitizeEnvironmentText(value: unknown): string {
     .replace(RELATIVE_PATH, "$1[redacted-path]")
     .replace(/(^|[\s("'=])~[\\/][^\r\n"'<>]*/gu, "$1[redacted-path]")
     .replace(POSIX_PATH, "$1[redacted-path]")
-    .replace(AUDIO_NAME, "[redacted-audio-name]");
+    .replace(FILE_NAME, "[redacted-file-name]");
   return redactEnvironmentSeparatorTokens(redacted)
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, MAX_ENVIRONMENT_TEXT);
+}
+
+export function sanitizePlatformText(value: unknown): string {
+  return sanitizeEnvironmentText(value).slice(0, MAX_SHORT_TEXT);
 }
 
 function redactEnvironmentSeparatorTokens(value: string): string {
@@ -154,6 +158,10 @@ function shortText(value: unknown): string | undefined {
 
 function environmentText(value: unknown): string | undefined {
   return typeof value === "string" ? sanitizeEnvironmentText(value) : undefined;
+}
+
+function platformText(value: unknown): string | undefined {
+  return typeof value === "string" ? sanitizePlatformText(value) : undefined;
 }
 
 function slot(value: unknown): "a" | "b" | undefined {
@@ -276,7 +284,7 @@ export function sanitizeCheckpointDetails(
       add(result, "buildCommit", shortText(own(value, "buildCommit")));
       add(result, "diagnosticSchemaVersion", own(value, "diagnosticSchemaVersion") === 1 ? 1 : undefined);
       add(result, "userAgent", environmentText(own(value, "userAgent")));
-      add(result, "platform", environmentText(own(value, "platform")));
+      add(result, "platform", platformText(own(value, "platform")));
       add(result, "deviceMemoryGiB", finite(own(value, "deviceMemoryGiB")));
       add(result, "hardwareConcurrency", finite(own(value, "hardwareConcurrency")));
       add(result, "webAssembly", typeof own(value, "webAssembly") === "boolean" ? own(value, "webAssembly") as boolean : undefined);

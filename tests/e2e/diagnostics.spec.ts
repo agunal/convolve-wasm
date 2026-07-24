@@ -285,3 +285,30 @@ test("offers diagnostic export beside a structured processing failure", async ({
   expect(json).not.toContain("do-not-export-b.wav");
   expect(failures).toEqual({ pageErrors: [], consoleErrors: [] });
 });
+
+test("exports marker-only recovery with unavailable-checkpoint wording", async ({ page }) => {
+  await page.addInitScript(({ activeKey }) => {
+    localStorage.setItem(activeKey, JSON.stringify({
+      schemaVersion: 1,
+      sessionId: "marker-only-session",
+      startedAt: "2026-07-23T20:00:00.000Z",
+      updatedAt: "2026-07-23T20:00:03.000Z",
+      lastCheckpointSequence: 0,
+      appVersion: "0.1.0",
+      buildCommit: "seed-build",
+    }));
+  }, { activeKey: ACTIVE_KEY });
+  await page.goto("/");
+
+  await expect(page.locator("#diagnostics-recovered")).toContainText(
+    /detailed checkpoints were unavailable/i,
+  );
+  const json = await downloadedText(page, "#diagnostics-download");
+  const report = JSON.parse(json) as {
+    sessions: Array<{ inference?: { markerOnly: boolean; statement: string } }>;
+  };
+  expect(report.sessions.at(-1)?.inference).toMatchObject({ markerOnly: true });
+  expect(report.sessions.at(-1)?.inference?.statement).toMatch(
+    /detailed checkpoints were unavailable/i,
+  );
+});

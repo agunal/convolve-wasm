@@ -1,6 +1,7 @@
 import type { DiagnosticEnvironment } from "./model";
 import {
   sanitizeEnvironmentText,
+  sanitizePlatformText,
   sanitizeError,
   sanitizeSensitiveText,
 } from "./sanitize";
@@ -126,7 +127,7 @@ export function copyEnvironment(
   const capabilities = field(value, "capabilities");
   return {
     userAgent: sanitizeEnvironmentText(field(value, "userAgent")),
-    platform: sanitizeEnvironmentText(field(value, "platform")),
+    platform: sanitizePlatformText(field(value, "platform")),
     deviceMemoryGiB: positive(field(value, "deviceMemoryGiB")),
     hardwareConcurrency: positive(field(value, "hardwareConcurrency")),
     capabilities: {

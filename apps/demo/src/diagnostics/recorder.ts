@@ -20,6 +20,7 @@ import {
 import {
   sanitizeCheckpointDetails,
   sanitizeEnvironmentText,
+  sanitizePlatformText,
   sanitizeSensitiveText,
 } from "./sanitize";
 
@@ -104,6 +105,8 @@ type MarkerMigration =
   | { kind: "unsupported" };
 const INFERENCE_STATEMENT =
   "A prior active marker was found; this does not establish out-of-memory or any exact cause.";
+const MARKER_ONLY_INFERENCE_STATEMENT =
+  "A prior active marker was found, but detailed checkpoints were unavailable; this does not establish out-of-memory or any exact cause.";
 const EXPORT_NOTICE =
   "Local diagnostic checkpoints only. Unexpected termination is an inference and does not identify an exact cause.";
 const encoder = new TextEncoder();
@@ -334,15 +337,25 @@ export class DiagnosticRecorder {
     this.activeSessionId = null;
     this.recoveredSessionId = null;
     this.lastProgressStage = null;
+    if (!this.storage) {
+      try {
+        this.storage = this.dependencies.getStorage();
+      } catch {
+        this.storageState = "unavailable";
+      }
+    }
     const storage = this.storage;
     if (storage) {
+      let failed = false;
       for (const key of [DIAGNOSTIC_STORE_KEY, DIAGNOSTIC_ACTIVE_KEY]) {
         try {
           storage.removeItem(key);
         } catch (error) {
+          failed = true;
           this.degradeFor(error);
         }
       }
+      if (!failed) this.storageState = "available";
     }
     this.notify();
   }
@@ -449,9 +462,7 @@ export class DiagnosticRecorder {
 
   private recover(marker: ActiveSessionMarker): void {
     const existing = this.sessions.find((session) => session.id === marker.sessionId);
-    if (existing && (
-      existing.status !== "active" || hasTerminalCheckpoint(existing)
-    )) {
+    if (existing && existing.status !== "active") {
       this.removeActiveMarker();
       return;
     }
@@ -464,7 +475,7 @@ export class DiagnosticRecorder {
       kind: "unexpected-termination",
       inferredAt,
       markerOnly,
-      statement: INFERENCE_STATEMENT,
+      statement: markerOnly ? MARKER_ONLY_INFERENCE_STATEMENT : INFERENCE_STATEMENT,
     };
     this.appendToSession(recovered, "unexpected-termination", { markerOnly });
     if (markerOnly) this.sessions.push(recovered);
@@ -724,7 +735,7 @@ function safeEnvironment(value: unknown): DiagnosticEnvironment {
   const capabilities = ownData(value, "capabilities");
   return {
     userAgent: sanitizeEnvironmentText(ownData(value, "userAgent")),
-    platform: sanitizeEnvironmentText(ownData(value, "platform")),
+    platform: sanitizePlatformText(ownData(value, "platform")),
     deviceMemoryGiB: safePositiveNumber(ownData(value, "deviceMemoryGiB")),
     hardwareConcurrency: safePositiveNumber(ownData(value, "hardwareConcurrency")),
     capabilities: {
