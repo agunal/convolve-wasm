@@ -44,6 +44,18 @@ describe("diagnostic privacy filtering", () => {
     expect(output).not.toContain("secret.wav");
   });
 
+  it("redacts complete drive paths before generic source URL handling", () => {
+    expect(sanitizeSensitiveText("C:\\Users\\Jane Doe")).toBe("[redacted-path]");
+    expect(sanitizeSensitiveText("C:/Users/Jane Doe")).toBe("[redacted-path]");
+  });
+
+  it("fails closed for an oversized string that ends inside a filename", () => {
+    const longBlobUrl = `blob:https://example.test/${"x".repeat(4_050)}`;
+    expect(sanitizeSensitiveText(`${longBlobUrl} private-recording.wav`)).toBe(
+      "[redacted-oversized-text]",
+    );
+  });
+
   it("allows only approved error fields and never walks arbitrary data", () => {
     const samples = new Float32Array([0.123456, -0.654321]);
     const output = sanitizeError(

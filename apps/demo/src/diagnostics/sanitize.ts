@@ -12,7 +12,7 @@ const BLOB_URL = /\bblob:[^\s"'<>]+/giu;
 const HTTP_URL = /\bhttps?:\/\/[^\s"'<>]+/giu;
 const SOURCE_URL = /\b[A-Za-z][A-Za-z0-9+.-]*:(?=[^\s"'<>])[^\s"'<>]*/gu;
 const FILE_URL = /\bfile:\/\/[^\s"'<>]+/giu;
-const WINDOWS_PATH = /\b[A-Za-z]:\\[^\r\n"'<>]*/gu;
+const WINDOWS_PATH = /\b[A-Za-z]:[\\/][^\r\n"'<>]*/gu;
 const UNC_PATH = /\\\\[^\r\n"'<>]*/gu;
 const RELATIVE_PATH = /(^|[\s("'=])(?:\.\.?[\\/])[^\r\n"'<>]*/gu;
 const SEPARATOR_PATH = /(^|[\s("'=])(?:~[\\/]|(?:[^\s"'<>\\/:]+[\\/])+)[^\r\n"'<>]*/gu;
@@ -42,13 +42,14 @@ const STAGES = new Set([
 ]);
 
 export function sanitizeSensitiveText(value: unknown): string {
-  const text = typeof value === "string" ? value.slice(0, MAX_INPUT_TEXT) : "";
+  const text = typeof value === "string" ? value : "";
+  if (text.length > MAX_INPUT_TEXT) return "[redacted-oversized-text]";
   return text
     .replace(BLOB_URL, "[redacted-blob-url]")
+    .replace(WINDOWS_PATH, "[redacted-path]")
     .replace(HTTP_URL, "[redacted-source-url]")
     .replace(FILE_URL, "[redacted-file-url]")
     .replace(SOURCE_URL, "[redacted-url]")
-    .replace(WINDOWS_PATH, "[redacted-path]")
     .replace(UNC_PATH, "[redacted-path]")
     .replace(RELATIVE_PATH, "$1[redacted-path]")
     .replace(SEPARATOR_PATH, "$1[redacted-path]")
