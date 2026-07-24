@@ -5,6 +5,7 @@ import type {
 } from "./model";
 
 const MAX_ERROR_TEXT = 512;
+const MAX_ENVIRONMENT_TEXT = 512;
 const MAX_INPUT_TEXT = 4_096;
 const MAX_SHORT_TEXT = 120;
 const AUDIO_NAME = /(?:["'][^"'<>\r\n]+\.(?:wav|m4a)["'])|(?:^|[\s("'=])(?:[^\s"'<>\\/:]+(?:[ \t]+[^\s"'<>\\/:]+)*)\.(?:wav|m4a)\b/giu;
@@ -17,6 +18,13 @@ const UNC_PATH = /\\\\[^\r\n"'<>]*/gu;
 const RELATIVE_PATH = /(^|[\s("'=])(?:\.\.?[\\/])[^\r\n"'<>]*/gu;
 const SEPARATOR_PATH = /(^|[\s("'=])(?:~[\\/]|(?:[^\s"'<>\\/:]+[\\/])+)[^\r\n"'<>]*/gu;
 const POSIX_PATH = /(^|[\s("'=])\/[^\r\n"'<>]*/gu;
+const ENVIRONMENT_SEPARATOR_TOKEN = /(^|[\s("'=;,])([A-Za-z0-9._+~-]+(?:[\\/][A-Za-z0-9._+~-]+)+)/gu;
+const UA_PRODUCT_NAMES = new Set([
+  "Mozilla", "AppleWebKit", "Chrome", "Chromium", "Safari", "Version",
+  "Dalvik", "Firefox", "FxiOS", "CriOS", "Edg", "EdgA", "EdgiOS",
+  "OPR", "SamsungBrowser", "GSA",
+]);
+const UA_BUILD_STYLE_NAMES = new Set(["Build", "Mobile"]);
 
 const ERROR_DETAIL_KEYS = [
   "estimatedBytes",
@@ -61,6 +69,50 @@ export function sanitizeSensitiveText(value: unknown): string {
     .slice(0, MAX_ERROR_TEXT);
 }
 
+export function sanitizeEnvironmentText(value: unknown): string {
+  const text = typeof value === "string" ? value : "";
+  if (text.length > MAX_INPUT_TEXT) return "[redacted-oversized-environment]";
+  const normalized = text
+    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const redacted = normalized
+    .replace(BLOB_URL, "[redacted-blob-url]")
+    .replace(WINDOWS_PATH, "[redacted-path]")
+    .replace(HTTP_URL, "[redacted-source-url]")
+    .replace(FILE_URL, "[redacted-file-url]")
+    .replace(SOURCE_URL, "[redacted-url]")
+    .replace(UNC_PATH, "[redacted-path]")
+    .replace(RELATIVE_PATH, "$1[redacted-path]")
+    .replace(/(^|[\s("'=])~[\\/][^\r\n"'<>]*/gu, "$1[redacted-path]")
+    .replace(POSIX_PATH, "$1[redacted-path]")
+    .replace(AUDIO_NAME, "[redacted-audio-name]");
+  return redactEnvironmentSeparatorTokens(redacted)
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, MAX_ENVIRONMENT_TEXT);
+}
+
+function redactEnvironmentSeparatorTokens(value: string): string {
+  return value.replace(
+    ENVIRONMENT_SEPARATOR_TOKEN,
+    (_match, prefix: string, token: string) =>
+      `${prefix}${isUserAgentProductToken(token) ? token : "[redacted-path]"}`,
+  );
+}
+
+function isUserAgentProductToken(value: string): boolean {
+  const segments = value.split(/[\\/]/u);
+  if (segments.length !== 2) return false;
+  const [product, version] = segments;
+  if (!product || !version) return false;
+  if (UA_BUILD_STYLE_NAMES.has(product)) {
+    return /^(?=[A-Za-z0-9._+-]*\d)[A-Z0-9][A-Za-z0-9._+-]*$/u.test(version);
+  }
+  return UA_PRODUCT_NAMES.has(product) &&
+    /^\d+(?:[._+-][A-Za-z0-9]+)*$/u.test(version);
+}
+
 type SafeError = {
   source: string;
   name?: string;
@@ -98,6 +150,10 @@ function shortText(value: unknown): string | undefined {
   return typeof value === "string"
     ? sanitizeSensitiveText(value).slice(0, MAX_SHORT_TEXT)
     : undefined;
+}
+
+function environmentText(value: unknown): string | undefined {
+  return typeof value === "string" ? sanitizeEnvironmentText(value) : undefined;
 }
 
 function slot(value: unknown): "a" | "b" | undefined {
@@ -219,8 +275,8 @@ export function sanitizeCheckpointDetails(
       add(result, "appVersion", shortText(own(value, "appVersion")));
       add(result, "buildCommit", shortText(own(value, "buildCommit")));
       add(result, "diagnosticSchemaVersion", own(value, "diagnosticSchemaVersion") === 1 ? 1 : undefined);
-      add(result, "userAgent", shortText(own(value, "userAgent")));
-      add(result, "platform", shortText(own(value, "platform")));
+      add(result, "userAgent", environmentText(own(value, "userAgent")));
+      add(result, "platform", environmentText(own(value, "platform")));
       add(result, "deviceMemoryGiB", finite(own(value, "deviceMemoryGiB")));
       add(result, "hardwareConcurrency", finite(own(value, "hardwareConcurrency")));
       add(result, "webAssembly", typeof own(value, "webAssembly") === "boolean" ? own(value, "webAssembly") as boolean : undefined);
@@ -336,7 +392,8 @@ export function sanitizeCheckpointDetails(
     }
     case "audio-error": {
       const result: DiagnosticDetails = {};
-      addError(result, own(value, "error"), "audio");
+      const nested = own(value, "error");
+      addError(result, nested === undefined ? value : nested, "audio");
       return result;
     }
   }

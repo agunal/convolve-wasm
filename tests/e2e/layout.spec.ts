@@ -70,6 +70,18 @@ test("desktop presents the embossed stone visual system", async ({ page }) => {
   await expect(page.locator(".control-label .ui-icon")).toHaveCount(4);
   await expect(page.locator(".site-footer .ui-icon")).toHaveCount(5);
   await expect(page.locator("#diagnostics")).toBeVisible();
+  const diagnosticsBadge = await page.locator("#diagnostics .section-heading .step")
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        width: element.getBoundingClientRect().width,
+        paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+        paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
+      };
+    });
+  expect(diagnosticsBadge.width).toBeGreaterThan(80);
+  expect(diagnosticsBadge.paddingInlineStart).toBeGreaterThanOrEqual(10);
+  expect(diagnosticsBadge.paddingInlineEnd).toBeGreaterThanOrEqual(10);
   await expectTouchTarget(page, "#run");
   await expectTouchTarget(page, "#diagnostics-download");
   await expectTouchTarget(page, "#diagnostics-clear");

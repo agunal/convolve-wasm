@@ -1,5 +1,6 @@
 import {
   sanitizeCheckpointDetails,
+  sanitizeEnvironmentText,
   sanitizeSensitiveText,
 } from "./sanitize";
 
@@ -180,6 +181,10 @@ function shortText(value: unknown): string | null {
   return sanitizeSensitiveText(value).slice(0, 120);
 }
 
+function environmentText(value: unknown): string | null {
+  return typeof value === "string" ? sanitizeEnvironmentText(value) : null;
+}
+
 function nullablePositiveNumber(value: unknown): number | null | undefined {
   if (value === null) return null;
   const number = finiteNumber(value);
@@ -209,8 +214,8 @@ function parseCapabilities(value: unknown): DiagnosticCapabilities | null {
 
 function parseEnvironment(value: unknown): DiagnosticEnvironment | null {
   if (value === null) return null;
-  const userAgent = shortText(own(value, "userAgent"));
-  const platform = shortText(own(value, "platform"));
+  const userAgent = environmentText(own(value, "userAgent"));
+  const platform = environmentText(own(value, "platform"));
   const deviceMemoryGiB = nullablePositiveNumber(own(value, "deviceMemoryGiB"));
   const hardwareConcurrency = nullablePositiveNumber(own(value, "hardwareConcurrency"));
   const capabilities = parseCapabilities(own(value, "capabilities"));

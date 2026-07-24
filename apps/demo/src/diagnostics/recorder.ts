@@ -17,7 +17,11 @@ import {
   type DiagnosticStorageState,
   type DiagnosticStore,
 } from "./model";
-import { sanitizeCheckpointDetails, sanitizeSensitiveText } from "./sanitize";
+import {
+  sanitizeCheckpointDetails,
+  sanitizeEnvironmentText,
+  sanitizeSensitiveText,
+} from "./sanitize";
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -71,6 +75,11 @@ export interface StartSessionInput {
     reverseCrossfadeMs: number;
     targetDbtp: number;
   };
+}
+
+export interface IncidentContext {
+  app: { version: string; buildCommit: string };
+  environment: DiagnosticEnvironment;
 }
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
@@ -211,8 +220,62 @@ export class DiagnosticRecorder {
     }
   }
 
-  recordIncident(type: DiagnosticCheckpointType, details: unknown): void {
-    this.checkpoint(type, details);
+  recordIncident(
+    type: DiagnosticCheckpointType,
+    details: unknown,
+    context?: IncidentContext,
+  ): void {
+    try {
+      const active = this.activeSession();
+      if (active) {
+        this.appendToSession(active, type, details);
+        this.persistRing();
+        this.persistActiveMarker();
+        this.notify();
+        return;
+      }
+
+      const terminal = [...this.sessions].reverse().find(isTerminal);
+      if (terminal) {
+        this.appendToSession(terminal, type, details);
+        this.persistRing(terminal.id);
+        this.notify();
+        return;
+      }
+
+      const startedAt = this.safeNow();
+      const app = safeApp(ownData(context, "app"));
+      const environment = safeEnvironment(ownData(context, "environment"));
+      this.activeStartedMonotonic = this.safeMonotonicNow();
+      const session: DiagnosticSession = {
+        schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
+        id: this.safeSessionId(),
+        startedAt,
+        updatedAt: startedAt,
+        status: "failed",
+        app,
+        environment,
+        checkpoints: [],
+        droppedCheckpoints: 0,
+      };
+      this.appendToSession(session, "session-start", {
+        appVersion: app.version,
+        buildCommit: app.buildCommit,
+        diagnosticSchemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
+        userAgent: environment.userAgent,
+        platform: environment.platform,
+        deviceMemoryGiB: environment.deviceMemoryGiB,
+        hardwareConcurrency: environment.hardwareConcurrency,
+        ...environment.capabilities,
+      });
+      this.appendToSession(session, type, details);
+      this.sessions.push(session);
+      this.sortAndRetain();
+      this.persistRing(session.id);
+      this.notify();
+    } catch {
+      // Incidents are observational and must never interrupt processing.
+    }
   }
 
   snapshot(): DiagnosticSnapshot {
@@ -476,7 +539,7 @@ export class DiagnosticRecorder {
     }
   }
 
-  private persistRing(): boolean {
+  private persistRing(protectedSessionId?: string): boolean {
     while (this.storage) {
       try {
         const store: DiagnosticStore = {
@@ -486,7 +549,7 @@ export class DiagnosticRecorder {
         this.storage.setItem(DIAGNOSTIC_STORE_KEY, JSON.stringify(store));
         return true;
       } catch (error) {
-        if (isQuotaError(error) && this.pruneOldestTerminal()) continue;
+        if (isQuotaError(error) && this.pruneOldestTerminal(protectedSessionId)) continue;
         this.degradeFor(error);
         return false;
       }
@@ -530,13 +593,14 @@ export class DiagnosticRecorder {
     }
   }
 
-  private pruneOldestTerminal(): boolean {
+  private pruneOldestTerminal(protectedSessionId?: string): boolean {
     this.sessions.sort(compareSessions);
     const index = this.sessions.findIndex(
       (session) =>
         isTerminal(session) &&
         session.id !== this.activeSessionId &&
-        session.id !== this.recoveredSessionId,
+        session.id !== this.recoveredSessionId &&
+        session.id !== protectedSessionId,
     );
     if (index < 0) return false;
     this.sessions.splice(index, 1);
@@ -659,8 +723,8 @@ function safePositiveNumber(value: unknown): number | null {
 function safeEnvironment(value: unknown): DiagnosticEnvironment {
   const capabilities = ownData(value, "capabilities");
   return {
-    userAgent: safeShortText(ownData(value, "userAgent")),
-    platform: safeShortText(ownData(value, "platform")),
+    userAgent: sanitizeEnvironmentText(ownData(value, "userAgent")),
+    platform: sanitizeEnvironmentText(ownData(value, "platform")),
     deviceMemoryGiB: safePositiveNumber(ownData(value, "deviceMemoryGiB")),
     hardwareConcurrency: safePositiveNumber(ownData(value, "hardwareConcurrency")),
     capabilities: {

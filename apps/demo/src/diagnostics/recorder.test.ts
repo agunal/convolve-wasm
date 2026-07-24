@@ -115,6 +115,123 @@ describe("DiagnosticRecorder", () => {
       .toMatchObject({ sessions: [expect.objectContaining({ status: "succeeded" })] });
   });
 
+  it("appends an incident to an active session and advances its marker", () => {
+    const storage = new FakeStorage();
+    const recorder = makeRecorder(storage);
+    recorder.startSession(startInput("active-incident"));
+    const operationBoundary = storage.operations.length;
+
+    recorder.recordIncident("visibility", { state: "hidden" });
+
+    expect(recorder.snapshot()).toMatchObject({
+      activeSessionId: "active-incident",
+      sessions: [expect.objectContaining({
+        id: "active-incident",
+        status: "active",
+        checkpoints: expect.arrayContaining([
+          expect.objectContaining({
+            type: "visibility",
+            details: { state: "hidden" },
+          }),
+        ]),
+      })],
+    });
+    expect(storage.operations.slice(operationBoundary)).toEqual([
+      `set:${DIAGNOSTIC_STORE_KEY}`,
+      `set:${DIAGNOSTIC_ACTIVE_KEY}`,
+    ]);
+    expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).not.toBeNull();
+  });
+  it("appends a late incident to the latest terminal session without reopening it", () => {
+    const storage = new FakeStorage();
+    const recorder = makeRecorder(storage);
+    recorder.startSession(startInput("late-incident"));
+    recorder.finish("succeeded", "success", { outputFrames: 1 });
+    const operationBoundary = storage.operations.length;
+
+    recorder.recordIncident("audio-error", {
+      error: {
+        source: "audio",
+        code: "MEDIA_ERR_DECODE",
+        message: "preview decode failed",
+      },
+    });
+
+    const [session] = recorder.snapshot().sessions;
+    expect(session).toMatchObject({
+      id: "late-incident",
+      status: "succeeded",
+    });
+    expect(session?.checkpoints.at(-1)).toMatchObject({
+      type: "audio-error",
+      details: {
+        source: "audio",
+        code: "MEDIA_ERR_DECODE",
+        message: "preview decode failed",
+      },
+    });
+    expect(storage.operations.slice(operationBoundary)).toEqual([
+      `set:${DIAGNOSTIC_STORE_KEY}`,
+    ]);
+    expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).toBeNull();
+    expect(JSON.parse(storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "{}"))
+      .toMatchObject({
+        sessions: [expect.objectContaining({
+          id: "late-incident",
+          status: "succeeded",
+          checkpoints: expect.arrayContaining([
+            expect.objectContaining({ type: "audio-error" }),
+          ]),
+        })],
+      });
+    expect(JSON.parse(recorder.exportJson())).toMatchObject({
+      sessions: [expect.objectContaining({
+        id: "late-incident",
+        status: "succeeded",
+      })],
+    });
+  });
+
+  it("creates a failed incident-only session without an active marker when idle", () => {
+    const storage = new FakeStorage();
+    const recorder = makeRecorder(storage);
+
+    recorder.recordIncident(
+      "error",
+      { source: "window", message: "idle failure" },
+      {
+        app: { version: "0.1.0", buildCommit: "incident-build" },
+        environment: validEnvironment(),
+      },
+    );
+
+    const snapshot = recorder.snapshot();
+    expect(snapshot.activeSessionId).toBeNull();
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.sessions[0]).toMatchObject({
+      status: "failed",
+      app: { version: "0.1.0", buildCommit: "incident-build" },
+      environment: validEnvironment(),
+      checkpoints: [
+        expect.objectContaining({ type: "session-start" }),
+        expect.objectContaining({
+          type: "error",
+          details: {
+            source: "window",
+            message: "idle failure",
+          },
+        }),
+      ],
+    });
+    expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).toBeNull();
+    expect(JSON.parse(storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "{}"))
+      .toMatchObject({
+        sessions: [expect.objectContaining({ status: "failed" })],
+      });
+    expect(JSON.parse(recorder.exportJson())).toMatchObject({
+      sessions: [expect.objectContaining({ status: "failed" })],
+    });
+  });
   it("rotates deterministically to six newest sessions", () => {
     const storage = new FakeStorage();
     const recorder = makeRecorder(storage);
@@ -262,6 +379,31 @@ describe("DiagnosticRecorder", () => {
       .toBeLessThanOrEqual(32_768);
   });
 
+  it("preserves realistic browser environment tokens in storage and export", () => {
+    const storage = new FakeStorage();
+    const recorder = makeRecorder(storage);
+    const input = startInput("android-environment");
+    const userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/UQ1A.240105.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+    input.environment = {
+      ...validEnvironment(),
+      userAgent,
+      platform: "Linux armv8l home/private/PRIVATE_PLATFORM_PATH.txt",
+    };
+
+    recorder.startSession(input);
+
+    const raw = storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "";
+    const stored = JSON.parse(raw) as DiagnosticStore;
+    const [session] = stored.sessions;
+    expect(session?.environment?.userAgent).toBe(userAgent);
+    expect(session?.environment?.platform).toContain("Linux armv8l");
+    expect(session?.environment?.platform).not.toContain("PRIVATE_PLATFORM_PATH");
+    expect(session?.checkpoints[0]?.details.userAgent).toBe(userAgent);
+    const exported = recorder.exportJson();
+    expect(exported).toContain("Mozilla/5.0");
+    expect(exported).toContain("Chrome/126.0.0.0");
+    expect(exported).not.toContain("PRIVATE_PLATFORM_PATH");
+  });
   it.each(["audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a"])(
     "retains legitimate bare MIME type %s",
     (mimeType) => {
@@ -402,6 +544,28 @@ describe("DiagnosticRecorder", () => {
     });
   });
 
+  it("keeps the updated terminal incident in memory when quota rejects it", () => {
+    const storage = new ToggleQuotaStorage();
+    const recorder = makeRecorder(storage);
+    recorder.startSession(startInput("late-incident-quota"));
+    recorder.finish("succeeded", "success", { outputFrames: 1 });
+    storage.quota = true;
+
+    recorder.recordIncident("audio-error", {
+      error: { source: "audio", code: "MEDIA_ERR_DECODE" },
+    });
+
+    expect(recorder.snapshot()).toMatchObject({
+      storageState: "quota-exceeded",
+      sessions: [expect.objectContaining({
+        id: "late-incident-quota",
+        status: "succeeded",
+        checkpoints: expect.arrayContaining([
+          expect.objectContaining({ type: "audio-error" }),
+        ]),
+      })],
+    });
+  });
   it("infers unexpected termination only for a nonterminal active marker", () => {
     const storage = seedActiveSession({ status: "active", terminal: false });
     const recorder = makeRecorder(storage);

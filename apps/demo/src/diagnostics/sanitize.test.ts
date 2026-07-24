@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as sanitizerModule from "./sanitize";
 
 import {
   DIAGNOSTIC_SCHEMA_VERSION,
@@ -12,6 +13,62 @@ import {
 } from "./sanitize";
 
 describe("diagnostic privacy filtering", () => {
+  it("preserves a realistic Android Chrome user agent", () => {
+    const sanitizeEnvironmentText = (
+      sanitizerModule as typeof sanitizerModule & {
+        sanitizeEnvironmentText?: (value: unknown) => string;
+      }
+    ).sanitizeEnvironmentText;
+    expect(sanitizeEnvironmentText).toBeTypeOf("function");
+    if (!sanitizeEnvironmentText) return;
+    const userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/UQ1A.240105.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+
+    expect(sanitizeEnvironmentText(userAgent)).toBe(userAgent);
+    expect(sanitizeEnvironmentText(userAgent).length).toBeLessThanOrEqual(512);
+  });
+
+  it("preserves a realistic iPhone Safari user agent", () => {
+    const sanitizeEnvironmentText = (
+      sanitizerModule as typeof sanitizerModule & {
+        sanitizeEnvironmentText?: (value: unknown) => string;
+      }
+    ).sanitizeEnvironmentText;
+    expect(sanitizeEnvironmentText).toBeTypeOf("function");
+    if (!sanitizeEnvironmentText) return;
+    const userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+    expect(sanitizeEnvironmentText(userAgent)).toBe(userAgent);
+  });
+  it.each([
+    ["HTTPS URL", "Chrome/126 https://private.example/PRIVATE_HTTP", "PRIVATE_HTTP"],
+    ["Blob URL", "Chrome/126 blob:https://private.example/PRIVATE_BLOB", "PRIVATE_BLOB"],
+    ["file URL", "Linux file:///home/private/PRIVATE_FILE", "PRIVATE_FILE"],
+    ["data URL", "Android data:text/plain,PRIVATE_DATA", "PRIVATE_DATA"],
+    ["Windows path", "Windows C:\\Users\\private\\PRIVATE_WINDOWS", "PRIVATE_WINDOWS"],
+    ["POSIX path", "Linux /home/private/PRIVATE_POSIX", "PRIVATE_POSIX"],
+    ["relative path", "Build ../private/PRIVATE_RELATIVE", "PRIVATE_RELATIVE"],
+    ["bare path", "Linux home/private/PRIVATE_BARE.txt", "PRIVATE_BARE"],
+    ["control-delimited path", "Chrome/126\u0000/home/private/PRIVATE_CONTROL_PATH", "PRIVATE_CONTROL_PATH"],
+    ["control text", "Android\u0000PRIVATE_CONTROL", "\u0000"],
+  ])("redacts %s in environment fields without treating version slashes as paths", (
+    _label,
+    input,
+    sentinel,
+  ) => {
+    const sanitizeEnvironmentText = (
+      sanitizerModule as typeof sanitizerModule & {
+        sanitizeEnvironmentText?: (value: unknown) => string;
+      }
+    ).sanitizeEnvironmentText;
+    expect(sanitizeEnvironmentText).toBeTypeOf("function");
+    if (!sanitizeEnvironmentText) return;
+
+    const output = sanitizeEnvironmentText(input);
+    expect(output).toContain(input.match(/^[A-Za-z]+(?:\/\d+)?/u)?.[0]);
+    expect(output).not.toContain(sentinel);
+    expect(output.length).toBeLessThanOrEqual(512);
+  });
+
   it.each([
     ["audio name", "Could not decode secret-take.wav", "secret-take"],
     ["M4A name", "bad VOICE.M4A input", "VOICE.M4A"],

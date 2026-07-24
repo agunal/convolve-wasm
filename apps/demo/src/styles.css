@@ -437,6 +437,18 @@ h3 {
     inset -1px -1px 2px rgb(255 255 255 / 5%);
 }
 
+
+:where(.diagnostics-panel) .section-heading {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+:where(.diagnostics-panel) .section-heading .step {
+  width: auto;
+  min-width: 38px;
+  padding-inline: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .file-grid,
 .controls-grid,
 .about-grid {

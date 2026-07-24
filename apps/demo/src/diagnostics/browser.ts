@@ -9,36 +9,44 @@ import type {
   DiagnosticSessionStatus,
 } from "./model";
 import {
+  copyEnvironment,
+  copyInputs,
+  copyOptions,
+  field,
+  finite,
+  mapMediaError,
+  nonNegative,
+  numberField,
+  positive,
+  safeMetaText,
+  stringField,
+  type BrowserAttemptInput,
+} from "./browser-mappers";
+import {
+  setHidden,
+  setText,
+  storageMessage,
+  summaryMessage,
+  type TextElement,
+} from "./browser-ui";
+import {
   DiagnosticRecorder,
   type DiagnosticSnapshot,
+  type IncidentContext,
   type StartSessionInput,
 } from "./recorder";
 import {
   sanitizeCheckpointDetails,
+  sanitizeEnvironmentText,
   sanitizeError,
-  sanitizeSensitiveText,
 } from "./sanitize";
 
 const PACKAGE_EVENT_NAME = "convolve-wasm:diagnostic";
 const CLEAR_CONFIRMATION =
   "Clear all crash diagnostics stored by convolve-wasm on this device?";
 const DOWNLOAD_NAME = "convolve-wasm-diagnostics.json";
-const MAX_META_LENGTH = 120;
 
-export interface BrowserAttemptInput {
-  inputs: Array<{
-    slot: "a" | "b";
-    mimeType: string;
-    encodedBytes: number;
-  }>;
-  options: {
-    appendReverse: boolean;
-    beatPan: "a" | "b" | null;
-    panTransitionMs: number;
-    reverseCrossfadeMs: number;
-    targetDbtp: number;
-  };
-}
+export type { BrowserAttemptInput } from "./browser-mappers";
 
 export interface BrowserDiagnostics {
   startAttempt(input: BrowserAttemptInput): void;
@@ -68,17 +76,17 @@ export interface BrowserDiagnosticRecorder {
     type: DiagnosticCheckpointType,
     details?: unknown,
   ): void;
-  recordIncident(type: DiagnosticCheckpointType, details: unknown): void;
+  recordIncident(
+    type: DiagnosticCheckpointType,
+    details: unknown,
+    context?: IncidentContext,
+  ): void;
   snapshot(): DiagnosticSnapshot;
   subscribe(listener: (snapshot: DiagnosticSnapshot) => void): () => void;
   exportJson(): string;
   clear(): void;
 }
 
-interface TextElement extends EventTarget {
-  hidden: boolean | string;
-  textContent: string | null;
-}
 
 interface DownloadAnchor {
   href: string;
@@ -130,6 +138,20 @@ export function createBrowserDiagnostics(
     }
   };
 
+  const recordIncident = (
+    type: DiagnosticCheckpointType,
+    details: unknown,
+  ): void => {
+    callRecorder(() => {
+      dependencies.recorder.recordIncident(type, details, {
+        app: {
+          version: safeMetaText(field(dependencies.app, "version")),
+          buildCommit: safeMetaText(field(dependencies.app, "buildCommit")),
+        },
+        environment: copyEnvironment(dependencies.environment),
+      });
+    });
+  };
   const render = (snapshot: DiagnosticSnapshot): void => {
     cachedExport = null;
     setText(
@@ -262,7 +284,7 @@ export function createBrowserDiagnostics(
       column: numberField(value, "colno"),
       details: field(nestedError, "details"),
     }, "window");
-    callRecorder(() => dependencies.recorder.recordIncident("error", mapped));
+    recordIncident("error", mapped);
   };
 
   const handleUnhandledRejection = (value: unknown): void => {
@@ -271,24 +293,21 @@ export function createBrowserDiagnostics(
       typeof reason === "string" ? { message: reason } : reason,
       "promise",
     );
-    callRecorder(() => dependencies.recorder.recordIncident("error", mapped));
+    recordIncident("error", mapped);
   };
 
   const handleVisibility = (): void => {
     const state = field(dependencies.documentTarget, "visibilityState");
-    callRecorder(() => {
-      dependencies.recorder.recordIncident(
-        "visibility",
-        { state: state === "hidden" ? "hidden" : "visible" },
-      );
-    });
+    recordIncident(
+      "visibility",
+      { state: state === "hidden" ? "hidden" : "visible" },
+    );
   };
 
   const handlePageHide = (value: unknown): void => {
     const persisted = field(value, "persisted") === true;
-    callRecorder(() => {
-      dependencies.recorder.recordIncident("pagehide", { persisted });
-    });
+    recordIncident("pagehide", { persisted });
+
     if (!persisted) {
       callRecorder(() => {
         dependencies.recorder.finish(
@@ -300,16 +319,11 @@ export function createBrowserDiagnostics(
   };
 
   const handleAudioError = (): void => {
-    const mapped = sanitizeError(
-      field(dependencies.previewTarget, "error"),
-      "audio",
+    const mapped = mapMediaError(field(dependencies.previewTarget, "error"));
+    recordIncident(
+      "audio-error",
+      { error: mapped },
     );
-    callRecorder(() => {
-      dependencies.recorder.recordIncident(
-        "audio-error",
-        { error: mapped },
-      );
-    });
   };
 
   safeListen(
@@ -497,155 +511,6 @@ function safeListen(
   }
 }
 
-function setText(element: TextElement | null, text: string): void {
-  try {
-    if (element) element.textContent = text;
-  } catch {
-    // UI reporting must not affect audio processing.
-  }
-}
-
-function setHidden(element: TextElement | null, hidden: boolean): void {
-  try {
-    if (element) element.hidden = hidden;
-  } catch {
-    // UI reporting must not affect audio processing.
-  }
-}
-
-function storageMessage(state: DiagnosticSnapshot["storageState"]): string {
-  switch (state) {
-    case "available":
-      return "Browser storage available. Diagnostic records stay on this device.";
-    case "quota-exceeded":
-      return "Storage quota exceeded. New diagnostics remain in the current tab only.";
-    case "recovered-corruption":
-      return "Invalid diagnostic storage was cleared. New records stay on this device.";
-    case "unsupported-schema":
-      return "Unsupported diagnostic storage was cleared. New records stay on this device.";
-    case "unavailable":
-      return "Browser storage unavailable. Diagnostics remain in the current tab only.";
-  }
-}
-
-function summaryMessage(snapshot: DiagnosticSnapshot): string {
-  const count = snapshot.sessions.length;
-  if (count === 0) return "No retained diagnostic sessions.";
-  const latest = snapshot.sessions[count - 1];
-  const noun = count === 1 ? "session" : "sessions";
-  if (!latest) return `${count} retained diagnostic ${noun}.`;
-  const checkpoints = latest.checkpoints.length;
-  const checkpointNoun = checkpoints === 1 ? "checkpoint" : "checkpoints";
-  return `${count} retained diagnostic ${noun}. Latest: ${latest.status} (${checkpoints} ${checkpointNoun}).`;
-}
-
-function field(value: unknown, key: string): unknown {
-  if (
-    (typeof value !== "object" || value === null) &&
-    typeof value !== "function"
-  ) return undefined;
-  try {
-    return Reflect.get(value, key);
-  } catch {
-    return undefined;
-  }
-}
-
-function stringField(value: unknown, key: string): string | undefined {
-  const candidate = field(value, key);
-  return typeof candidate === "string" ? candidate : undefined;
-}
-
-function numberField(value: unknown, key: string): number | undefined {
-  const candidate = finite(field(value, key));
-  return candidate === null ? undefined : candidate;
-}
-
-function finite(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function nonNegative(value: unknown): number | null {
-  const number = finite(value);
-  return number !== null && number >= 0 ? number : null;
-}
-
-function positive(value: unknown): number | null {
-  const number = finite(value);
-  return number !== null && number > 0 ? number : null;
-}
-
-function safeMetaText(value: unknown): string {
-  return typeof value === "string"
-    ? sanitizeSensitiveText(value).slice(0, MAX_META_LENGTH)
-    : "";
-}
-
-function copyInputs(value: unknown): BrowserAttemptInput["inputs"] {
-  if (!Array.isArray(value)) return [];
-  const result: BrowserAttemptInput["inputs"] = [];
-  for (let index = 0; index < Math.min(value.length, 2); index += 1) {
-    const candidate = value[index];
-    const slot = field(candidate, "slot");
-    const mimeType = field(candidate, "mimeType");
-    const encodedBytes = nonNegative(field(candidate, "encodedBytes"));
-    if (
-      (slot === "a" || slot === "b") &&
-      typeof mimeType === "string" &&
-      encodedBytes !== null
-    ) {
-      result.push({
-        slot,
-        mimeType: safeMimeType(mimeType),
-        encodedBytes,
-      });
-    }
-  }
-  return result;
-}
-
-function safeMimeType(value: string): string {
-  const bounded = value.slice(0, MAX_META_LENGTH)
-    .replace(/[\u0000-\u001f\u007f]/gu, "")
-    .trim();
-  return /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(bounded)
-    ? bounded
-    : "";
-}
-
-function copyOptions(value: unknown): BrowserAttemptInput["options"] {
-  const beatPan = field(value, "beatPan");
-  return {
-    appendReverse: field(value, "appendReverse") === true,
-    beatPan: beatPan === "a" || beatPan === "b" ? beatPan : null,
-    panTransitionMs: nonNegative(field(value, "panTransitionMs")) ?? 0,
-    reverseCrossfadeMs:
-      nonNegative(field(value, "reverseCrossfadeMs")) ?? 0,
-    targetDbtp: finite(field(value, "targetDbtp")) ?? 0,
-  };
-}
-
-function copyEnvironment(value: DiagnosticEnvironment): DiagnosticEnvironment {
-  const capabilities = field(value, "capabilities");
-  return {
-    userAgent: safeMetaText(field(value, "userAgent")),
-    platform: safeMetaText(field(value, "platform")),
-    deviceMemoryGiB: positive(field(value, "deviceMemoryGiB")),
-    hardwareConcurrency: positive(field(value, "hardwareConcurrency")),
-    capabilities: {
-      webAssembly: field(capabilities, "webAssembly") === true,
-      worker: field(capabilities, "worker") === true,
-      offlineAudioContext:
-        field(capabilities, "offlineAudioContext") === true,
-      readableStream: field(capabilities, "readableStream") === true,
-      responseBlob: field(capabilities, "responseBlob") === true,
-      randomUUID: field(capabilities, "randomUUID") === true,
-      localStorage: field(capabilities, "localStorage") === true,
-      clipboard: field(capabilities, "clipboard") === true,
-    },
-  };
-}
-
 function defaultDependencies(): BrowserDiagnosticsDependencies {
   const clipboardWrite = clipboardWriter();
   const environment = browserEnvironment(clipboardWrite !== null);
@@ -741,8 +606,8 @@ function browserEnvironment(clipboard: boolean): DiagnosticEnvironment {
   const modernPlatform = field(userAgentData, "platform");
   const legacyPlatform = field(navigatorValue, "platform");
   return {
-    userAgent: safeMetaText(field(navigatorValue, "userAgent")),
-    platform: safeMetaText(
+    userAgent: sanitizeEnvironmentText(field(navigatorValue, "userAgent")),
+    platform: sanitizeEnvironmentText(
       typeof modernPlatform === "string" ? modernPlatform : legacyPlatform,
     ),
     deviceMemoryGiB: positive(field(navigatorValue, "deviceMemory")),

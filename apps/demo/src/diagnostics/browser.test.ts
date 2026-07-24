@@ -1,10 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ConvolveMetadata } from "@takana-labs/convolve-wasm";
 
 import {
   createBrowserDiagnostics,
+  type BrowserDiagnosticRecorder,
   type BrowserDiagnosticsDependencies,
 } from "./browser";
-import type { DiagnosticSnapshot } from "./recorder";
+import {
+  DIAGNOSTIC_ACTIVE_KEY,
+  DIAGNOSTIC_STORE_KEY,
+  type DiagnosticStore,
+} from "./model";
+import {
+  DiagnosticRecorder,
+  type DiagnosticSnapshot,
+  type RecorderDependencies,
+  type StorageLike,
+} from "./recorder";
+
+class BrowserStorage implements StorageLike {
+  readonly values = new Map<string, string>();
+  failWrites = false;
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    if (this.failWrites) throw new DOMException("blocked", "SecurityError");
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+}
 
 class FakeElement extends EventTarget {
   hidden = false;
@@ -63,7 +93,7 @@ function validAttempt() {
 }
 
 function browserDependencies(
-  recorder = fakeRecorder(),
+  recorder: BrowserDiagnosticRecorder = fakeRecorder(),
 ): BrowserDiagnosticsDependencies & {
   windowTarget: EventTarget;
   documentTarget: EventTarget & { visibilityState: DocumentVisibilityState };
@@ -126,6 +156,35 @@ function browserDependencies(
   };
 }
 
+function actualRecorder(
+  storage: BrowserStorage,
+  overrides: Partial<RecorderDependencies> = {},
+): DiagnosticRecorder {
+  let wallTime = Date.parse("2026-07-23T20:00:00.000Z");
+  let monotonic = 0;
+  return new DiagnosticRecorder({
+    getStorage: () => storage,
+    now: () => new Date(wallTime++),
+    monotonicNow: () => monotonic++,
+    id: () => `browser-${wallTime}`,
+    defer: (task) => task(),
+    ...overrides,
+  });
+}
+
+function validMetadata(): ConvolveMetadata {
+  return {
+    sampleRate: 48_000,
+    channels: 2,
+    durationSeconds: 1,
+    outputFrames: 48_000,
+    detectedBeats: 1,
+    detectedBpm: 120,
+    beatConfidence: 0.9,
+    appliedGainDb: -2,
+    estimatedTruePeakDbtp: -1,
+  };
+}
 function allThrowingDependencies(): BrowserDiagnosticsDependencies {
   const throwing = () => {
     throw new Error("diagnostic dependency failed");
@@ -221,6 +280,97 @@ describe("browser diagnostics", () => {
     );
   });
 
+  it("persists a post-success preview incident without changing terminal status", () => {
+    const storage = new BrowserStorage();
+    const recorder = actualRecorder(storage);
+    const dependencies = browserDependencies(recorder);
+    const diagnostics = createBrowserDiagnostics(dependencies);
+
+    diagnostics.startAttempt(validAttempt());
+    diagnostics.finishSuccess(validMetadata());
+    dependencies.previewTarget.error = { message: "preview decode failed" };
+    dependencies.previewTarget.dispatchEvent(new Event("error"));
+
+    const [session] = recorder.snapshot().sessions;
+    expect(session).toMatchObject({ status: "succeeded" });
+    expect(session?.checkpoints.at(-1)?.type).toBe("audio-error");
+    expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).toBeNull();
+    expect(JSON.parse(storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "{}"))
+      .toMatchObject({
+        sessions: [expect.objectContaining({
+          status: "succeeded",
+          checkpoints: expect.arrayContaining([
+            expect.objectContaining({ type: "audio-error" }),
+          ]),
+        })],
+      });
+    expect(JSON.parse(recorder.exportJson())).toMatchObject({
+      sessions: [expect.objectContaining({ status: "succeeded" })],
+    });
+  });
+
+  it("persists idle global incidents as one failed incident-only session", () => {
+    const storage = new BrowserStorage();
+    const recorder = actualRecorder(storage);
+    const dependencies = browserDependencies(recorder);
+    const diagnostics = createBrowserDiagnostics(dependencies);
+
+    diagnostics.handleWindowError({ message: "idle window failure" });
+    diagnostics.handleUnhandledRejection({
+      reason: { message: "idle promise failure" },
+    });
+
+    const snapshot = recorder.snapshot();
+    expect(snapshot.activeSessionId).toBeNull();
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.sessions[0]).toMatchObject({
+      status: "failed",
+      app: dependencies.app,
+      environment: dependencies.environment,
+    });
+    expect(snapshot.sessions[0]?.checkpoints.filter(
+      (checkpoint) => checkpoint.type === "error",
+    )).toHaveLength(2);
+    expect(storage.getItem(DIAGNOSTIC_ACTIVE_KEY)).toBeNull();
+    const rawStore = JSON.parse(
+      storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "{}",
+    ) as DiagnosticStore;
+    expect(rawStore.sessions[0]).toMatchObject({
+      status: "failed",
+      app: dependencies.app,
+      checkpoints: expect.arrayContaining([
+        expect.objectContaining({ type: "error" }),
+      ]),
+    });
+    expect(JSON.parse(recorder.exportJson())).toMatchObject({
+      sessions: [expect.objectContaining({
+        status: "failed",
+        app: dependencies.app,
+      })],
+    });
+  });
+
+  it("keeps later processing successful after incident persistence fails", () => {
+    const storage = new BrowserStorage();
+    storage.failWrites = true;
+    const recorder = actualRecorder(storage);
+    const dependencies = browserDependencies(recorder);
+    const diagnostics = createBrowserDiagnostics(dependencies);
+
+    expect(() => {
+      diagnostics.handleWindowError({ message: "storage write failed" });
+      diagnostics.startAttempt(validAttempt());
+      diagnostics.finishSuccess(validMetadata());
+    }).not.toThrow();
+
+    expect(recorder.snapshot()).toMatchObject({
+      storageState: "unavailable",
+      sessions: [
+        expect.objectContaining({ status: "failed" }),
+        expect.objectContaining({ status: "succeeded" }),
+      ],
+    });
+  });
   it("captures window and promise errors without preventing defaults", () => {
     const recorder = fakeRecorder();
     const diagnostics = createBrowserDiagnostics(
@@ -266,6 +416,10 @@ describe("browser diagnostics", () => {
     expect(recorder.recordIncident).toHaveBeenLastCalledWith(
       "pagehide",
       { persisted: true },
+      expect.objectContaining({
+        app: dependencies.app,
+        environment: dependencies.environment,
+      }),
     );
     expect(recorder.finish).not.toHaveBeenCalled();
 
@@ -275,6 +429,10 @@ describe("browser diagnostics", () => {
     expect(recorder.recordIncident).toHaveBeenLastCalledWith(
       "pagehide",
       { persisted: false },
+      expect.objectContaining({
+        app: dependencies.app,
+        environment: dependencies.environment,
+      }),
     );
     expect(recorder.finish).toHaveBeenCalledWith(
       "clean-shutdown",
@@ -322,6 +480,50 @@ describe("browser diagnostics", () => {
     );
   });
 
+  it.each([
+    ["active", "progress-stage", false],
+    ["unexpected-termination", "unexpected-termination", true],
+    ["succeeded", "success", false],
+  ] as const)(
+    "renders %s latest-session status, boundary, and updated time",
+    (status, boundary, recovered) => {
+      const updatedAt = "2026-07-23T20:00:03.000Z";
+      const snapshot: DiagnosticSnapshot = {
+        ...emptySnapshot(),
+        activeSessionId: status === "active" ? "summary-session" : null,
+        recoveredSessionId: recovered ? "summary-session" : null,
+        sessions: [{
+          schemaVersion: 1,
+          id: "summary-session",
+          startedAt: "2026-07-23T20:00:00.000Z",
+          updatedAt,
+          status,
+          app: { version: "0.1.0", buildCommit: "test" },
+          environment: null,
+          checkpoints: [{
+            sequence: 0,
+            type: boundary,
+            timestamp: updatedAt,
+            elapsedMs: 3,
+            details: {},
+          }],
+          droppedCheckpoints: 0,
+        }],
+      };
+      const dependencies = browserDependencies(fakeRecorder(snapshot));
+
+      createBrowserDiagnostics(dependencies);
+
+      expect(dependencies.ui.summary.textContent).toContain(status);
+      expect(dependencies.ui.summary.textContent).toContain(
+        `last boundary ${boundary}`,
+      );
+      expect(dependencies.ui.summary.textContent).toContain(
+        `updated ${updatedAt}`,
+      );
+      expect(dependencies.ui.summary.textContent?.length).toBeLessThan(300);
+    },
+  );
   it("renders recovery, storage, summaries, clipboard support, and confirmed clear", () => {
     const recovered = {
       ...emptySnapshot(),
@@ -361,6 +563,72 @@ describe("browser diagnostics", () => {
     expect(dependencies.ui.failureDownload.hidden).toBe(false);
   });
 
+  it.each([
+    [1, "MEDIA_ERR_ABORTED"],
+    [2, "MEDIA_ERR_NETWORK"],
+    [3, "MEDIA_ERR_DECODE"],
+    [4, "MEDIA_ERR_SRC_NOT_SUPPORTED"],
+  ] as const)(
+    "maps prototype-backed MediaError code %s to %s",
+    (numericCode, category) => {
+      const recorder = fakeRecorder();
+      const dependencies = browserDependencies(recorder);
+      createBrowserDiagnostics(dependencies);
+      dependencies.previewTarget.error = Object.create({
+        code: numericCode,
+        message: "decoder rejected preview",
+        privateField: "DROP",
+      });
+
+      dependencies.previewTarget.dispatchEvent(new Event("error"));
+
+      expect(recorder.recordIncident).toHaveBeenLastCalledWith(
+        "audio-error",
+        {
+          error: {
+            source: "audio",
+            code: category,
+            message: "decoder rejected preview",
+          },
+        },
+        expect.any(Object),
+      );
+      expect(JSON.stringify(recorder.recordIncident.mock.calls)).not.toContain(
+        "privateField",
+      );
+    },
+  );
+
+  it("isolates hostile MediaError accessors", () => {
+    const recorder = fakeRecorder();
+    const dependencies = browserDependencies(recorder);
+    createBrowserDiagnostics(dependencies);
+    const hostilePrototype = Object.defineProperties({}, {
+      code: {
+        get() {
+          throw new Error("PRIVATE_CODE_ACCESSOR");
+        },
+      },
+      message: {
+        get() {
+          throw new Error("PRIVATE_MESSAGE_ACCESSOR");
+        },
+      },
+    });
+    dependencies.previewTarget.error = Object.create(hostilePrototype);
+
+    expect(() => {
+      dependencies.previewTarget.dispatchEvent(new Event("error"));
+    }).not.toThrow();
+    expect(recorder.recordIncident).toHaveBeenLastCalledWith(
+      "audio-error",
+      { error: { source: "audio" } },
+      expect.any(Object),
+    );
+    expect(JSON.stringify(recorder.recordIncident.mock.calls)).not.toContain(
+      "PRIVATE_",
+    );
+  });
   it("maps attempt, progress, metadata, and audio failures through fresh allowlists", () => {
     const recorder = fakeRecorder();
     const dependencies = browserDependencies(recorder);
@@ -411,6 +679,10 @@ describe("browser diagnostics", () => {
     expect(recorder.recordIncident).toHaveBeenCalledWith(
       "audio-error",
       expect.not.objectContaining({ secret: expect.anything() }),
+      expect.objectContaining({
+        app: dependencies.app,
+        environment: dependencies.environment,
+      }),
     );
     expect(JSON.stringify(recorder.recordIncident.mock.calls)).not.toContain(
       "preview.wav",
