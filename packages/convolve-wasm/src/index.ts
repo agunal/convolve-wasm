@@ -13,12 +13,15 @@ export type {
 
 import { createConvolver } from "./convolver";
 import { getDefaultDecodeBackend } from "./decode";
+import { emitBrowserDiagnostic } from "./diagnostics";
 import type { ConvolveOptions, ConvolveResult } from "./types";
 import { WorkerClient } from "./worker-client";
 
+const diagnostics = emitBrowserDiagnostic;
 const convolve = createConvolver({
   getDecodeBackend: getDefaultDecodeBackend,
-  workerClient: new WorkerClient(),
+  diagnostics,
+  workerClient: new WorkerClient(undefined, diagnostics),
 });
 
 export async function CONVOLVE(

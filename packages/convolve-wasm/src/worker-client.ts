@@ -1,4 +1,9 @@
 import type { DecodedInputPair, DecodedStereoAudio } from "./decode";
+import {
+  notifyDiagnostic,
+  safeDiagnosticError,
+  type DiagnosticObserver,
+} from "./diagnostics";
 import { ConvolveError } from "./errors";
 import type { NormalizedConvolveOptions } from "./options";
 import type {
@@ -9,6 +14,7 @@ import type {
 import {
   PCM24_CHUNK_FRAMES,
   WAV_HEADER_BYTES,
+  type WorkerDiagnosticEvent,
   type WorkerProcessOptions,
   type WorkerRequest,
   type WorkerResponse,
@@ -24,6 +30,10 @@ export interface WorkerLike {
     type: "error",
     listener: (event: ErrorEvent) => void,
   ): void;
+  addEventListener(
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
   terminate?(): void;
 }
 
@@ -36,12 +46,17 @@ interface PendingRequest {
   output?: OutputAssembly;
 }
 
+type OutputMilestone = 0.25 | 0.5 | 0.75;
+
 interface OutputAssembly {
   metadata: ConvolveMetadata;
   controller: ReadableStreamDefaultController<Uint8Array>;
   blob: Promise<Blob>;
   sequence: number;
   offset: number;
+  chunkCount: number;
+  pcmBytes: number;
+  nextMilestone: OutputMilestone | null;
 }
 
 function defaultWorkerFactory(): WorkerLike {
@@ -183,6 +198,46 @@ function validateHeader(header: ArrayBuffer, frames: number): void {
   }
 }
 
+const MISSING_OWN_DATA = Symbol("missing own data");
+
+function ownData(
+  value: unknown,
+  key: string,
+): unknown | typeof MISSING_OWN_DATA {
+  if (typeof value !== "object" || value === null) return MISSING_OWN_DATA;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && "value" in descriptor
+      ? descriptor.value
+      : MISSING_OWN_DATA;
+  } catch {
+    return MISSING_OWN_DATA;
+  }
+}
+
+function reconstructWorkerDiagnostic(
+  value: unknown,
+): WorkerDiagnosticEvent | undefined {
+  try {
+    switch (ownData(value, "type")) {
+      case "wasm-init-start":
+        return { type: "wasm-init-start" };
+      case "wasm-init-success":
+        return { type: "wasm-init-success" };
+      case "wasm-init-failure": {
+        const error = ownData(value, "error");
+        return error === MISSING_OWN_DATA
+          ? undefined
+          : { type: "wasm-init-failure", error: safeDiagnosticError(error) };
+      }
+      default:
+        return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export class WorkerClient {
   private worker: WorkerLike | undefined;
   private nextRequestId = 1;
@@ -190,6 +245,7 @@ export class WorkerClient {
 
   constructor(
     private readonly workerFactory: WorkerFactory = defaultWorkerFactory,
+    private readonly diagnostics?: DiagnosticObserver,
   ) {}
 
   process(
@@ -250,20 +306,45 @@ export class WorkerClient {
       if (this.worker !== worker) return;
 
       const message = event.message || "The processing worker failed";
+      const error = new ConvolveError("PROCESSING_FAILED", message, {
+        fileName: event.filename,
+        lineNumber: event.lineno,
+        columnNumber: event.colno,
+      });
       this.worker = undefined;
       try {
         worker.terminate?.();
       } finally {
-        this.rejectAll(
-          new ConvolveError("PROCESSING_FAILED", message, {
-            fileName: event.filename,
-            lineNumber: event.lineno,
-            columnNumber: event.colno,
-          }),
-        );
+        this.rejectAll(error);
       }
+      notifyDiagnostic(this.diagnostics, {
+        type: "worker-error",
+        error: safeDiagnosticError({
+          name: error.name,
+          code: error.code,
+          message: error.message,
+          lineNumber: event.lineno,
+          columnNumber: event.colno,
+        }),
+      });
+    });
+    worker.addEventListener("messageerror", () => {
+      if (this.worker !== worker) return;
+
+      const message = "The processing worker emitted an unreadable message";
+      this.worker = undefined;
+      try {
+        worker.terminate?.();
+      } finally {
+        this.rejectAll(new ConvolveError("PROCESSING_FAILED", message));
+      }
+      notifyDiagnostic(this.diagnostics, {
+        type: "worker-messageerror",
+        error: safeDiagnosticError({ name: "DataCloneError", message }),
+      });
     });
     this.worker = worker;
+    notifyDiagnostic(this.diagnostics, { type: "worker-created" });
     return worker;
   }
 
@@ -285,37 +366,67 @@ export class WorkerClient {
     }
   }
 
-  private handleMessage(response: WorkerResponse): void {
-    const pending = this.pending.get(response.id);
+  private handleMessage(value: unknown): void {
+    const type = ownData(value, "type");
+    const id = ownData(value, "id");
+    if (typeof id !== "string") return;
+
+    const pending = this.pending.get(id);
     if (!pending) return;
 
+    if (type === "diagnostic") {
+      const event = reconstructWorkerDiagnostic(ownData(value, "event"));
+      if (event) notifyDiagnostic(this.diagnostics, event);
+      return;
+    }
+
+    const response = value as WorkerResponse;
     try {
-      switch (response.type) {
+      switch (type) {
         case "progress":
-          pending.onProgress?.(response.event);
+          pending.onProgress?.(
+            (response as Extract<WorkerResponse, { type: "progress" }>).event,
+          );
           break;
-        case "error":
+        case "error": {
+          const errorResponse = response as Extract<
+            WorkerResponse,
+            { type: "error" }
+          >;
           this.fail(
-            response.id,
+            id,
             new ConvolveError(
-              response.error.code,
-              response.error.message,
-              response.error.details,
+              errorResponse.error.code,
+              errorResponse.error.message,
+              errorResponse.error.details,
             ),
           );
           break;
+        }
         case "output-start":
-          this.handleOutputStart(response.id, pending, response);
+          this.handleOutputStart(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "output-start" }>,
+          );
           break;
         case "output-chunk":
-          this.handleOutputChunk(response.id, pending, response);
+          this.handleOutputChunk(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "output-chunk" }>,
+          );
           break;
         case "result":
-          this.handleResult(response.id, pending, response);
+          this.handleResult(
+            id,
+            pending,
+            response as Extract<WorkerResponse, { type: "result" }>,
+          );
           break;
       }
     } catch (cause) {
-      this.fail(response.id, cause);
+      this.fail(id, cause);
     }
   }
 
@@ -349,7 +460,14 @@ export class WorkerClient {
       blob,
       sequence: 0,
       offset: 0,
+      chunkCount: 0,
+      pcmBytes: 0,
+      nextMilestone: 0.25,
     };
+    notifyDiagnostic(this.diagnostics, {
+      type: "output-start",
+      outputFrames: response.metadata.outputFrames,
+    });
     this.pull(id, pending.output);
   }
 
@@ -376,6 +494,21 @@ export class WorkerClient {
     output.controller.enqueue(new Uint8Array(response.pcm));
     output.sequence += 1;
     output.offset += response.frames;
+    output.chunkCount += 1;
+    output.pcmBytes += response.pcm.byteLength;
+    while (
+      output.nextMilestone !== null &&
+      output.offset >= output.metadata.outputFrames * output.nextMilestone
+    ) {
+      const fraction = output.nextMilestone;
+      notifyDiagnostic(this.diagnostics, {
+        type: "output-milestone",
+        fraction,
+        chunkCount: output.chunkCount,
+        pcmBytes: output.pcmBytes,
+      });
+      output.nextMilestone = followingMilestone(fraction);
+    }
     if (output.offset < output.metadata.outputFrames) {
       this.pull(id, output);
     }
@@ -408,7 +541,15 @@ export class WorkerClient {
     output.controller.close();
     this.pending.delete(id);
     void output.blob.then(
-      (wav) => pending.resolve({ wav, metadata: response.metadata }),
+      (wav) => {
+        notifyDiagnostic(this.diagnostics, {
+          type: "blob-complete",
+          chunkCount: output.chunkCount,
+          pcmBytes: output.pcmBytes,
+          wavBytes: wav.size,
+        });
+        pending.resolve({ wav, metadata: response.metadata });
+      },
       (cause) => pending.reject(cause),
     );
   }
@@ -440,6 +581,7 @@ export class WorkerClient {
   private postCancel(id: string): void {
     try {
       this.worker?.postMessage({ type: "cancel", id });
+      notifyDiagnostic(this.diagnostics, { type: "worker-cancelled" });
     } catch {
       // The terminal failure has already been reported.
     }
@@ -454,6 +596,19 @@ export class WorkerClient {
         this.pending.delete(id);
       }
     }
+  }
+}
+
+function followingMilestone(
+  milestone: OutputMilestone,
+): OutputMilestone | null {
+  switch (milestone) {
+    case 0.25:
+      return 0.5;
+    case 0.5:
+      return 0.75;
+    case 0.75:
+      return null;
   }
 }
 

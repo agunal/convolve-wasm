@@ -382,7 +382,8 @@ h3 {
 .panel,
 .run-panel,
 .result-panel,
-.about-panel {
+.about-panel,
+.diagnostics-panel {
   position: relative;
   border: 1px solid rgb(167 181 187 / 14%);
   border-radius: 22px;
@@ -398,7 +399,8 @@ h3 {
 
 .panel::before,
 .result-panel::before,
-.about-panel::before {
+.about-panel::before,
+.diagnostics-panel::before {
   position: absolute;
   inset: 8px;
   border: 1px solid rgb(0 0 0 / 30%);
@@ -435,6 +437,18 @@ h3 {
     inset -1px -1px 2px rgb(255 255 255 / 5%);
 }
 
+
+:where(.diagnostics-panel) .section-heading {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+:where(.diagnostics-panel) .section-heading .step {
+  width: auto;
+  min-width: 38px;
+  padding-inline: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .file-grid,
 .controls-grid,
 .about-grid {
@@ -700,6 +714,117 @@ a:focus-visible {
   opacity: 0.34;
 }
 
+.diagnostics-panel {
+  position: relative;
+  margin-top: 18px;
+  padding: clamp(22px, 4vw, 32px);
+}
+
+.diagnostics-storage,
+.diagnostics-summary,
+.diagnostics-recovered,
+.diagnostics-help {
+  position: relative;
+  z-index: 1;
+}
+
+.diagnostics-recovered {
+  border: 1px solid rgb(196 155 115 / 30%);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgb(196 155 115 / 8%);
+  color: #d8bea4;
+}
+
+.diagnostics-actions {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diagnostics-actions button,
+#failure-diagnostics-download {
+  min-height: 44px;
+}
+
+.diagnostics-storage {
+  margin: 0 0 10px;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.diagnostics-summary {
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.diagnostics-recovered {
+  margin-bottom: 16px;
+  line-height: 1.55;
+}
+
+.diagnostics-actions button,
+#failure-diagnostics-download {
+  border: 1px solid rgb(164 178 183 / 16%);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 7%), transparent 35%),
+    #283238;
+  color: #c9d0d2;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 7%),
+    3px 5px 12px rgb(0 0 0 / 28%);
+}
+
+.diagnostics-actions button:hover,
+#failure-diagnostics-download:hover {
+  border-color: rgb(196 206 209 / 28%);
+  color: #eef1f1;
+}
+
+#failure-diagnostics-download:not([hidden]) {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: -6px 0 18px;
+}
+
+.diagnostics-help {
+  margin-top: 20px;
+  border-top: 1px solid rgb(167 181 187 / 11%);
+  padding-top: 12px;
+  color: var(--ink-soft);
+}
+
+.diagnostics-help summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  color: #c9d0d2;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.diagnostics-help ol {
+  padding-left: 1.3rem;
+  line-height: 1.6;
+}
+
+.diagnostics-help p {
+  margin-bottom: 0;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+
 .about-panel {
   margin-top: 18px;
   padding: clamp(22px, 4vw, 32px);
@@ -806,7 +931,8 @@ a:focus-visible {
   .file-grid,
   .controls-grid,
   .about-grid,
-  .result-actions {
+  .result-actions,
+  .diagnostics-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -816,7 +942,9 @@ a:focus-visible {
   }
 
   #run,
-  .download {
+  .download,
+  .diagnostics-actions button,
+  #failure-diagnostics-download {
     width: 100%;
   }
 }

@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DecodedInputPair } from "./decode";
+import type { ConvolveDiagnosticEvent } from "./diagnostics";
 import { normalizeOptions } from "./options";
-import type { ConvolveMetadata, ConvolveProgress } from "./types";
+import type {
+  ConvolveMetadata,
+  ConvolveProgress,
+  ConvolveResult,
+} from "./types";
 import { WorkerClient } from "./worker-client";
 import type {
   WorkerRequest,
@@ -20,6 +25,9 @@ class FakeWorker {
     (event: MessageEvent<WorkerResponse>) => void
   >();
   readonly errorListeners = new Set<(event: ErrorEvent) => void>();
+  readonly messageerrorListeners = new Set<
+    (event: MessageEvent<unknown>) => void
+  >();
 
   postMessage(message: WorkerRequest, transfer: Transferable[] = []): void {
     this.posts.push({ message, transfer });
@@ -34,17 +42,26 @@ class FakeWorker {
     listener: (event: ErrorEvent) => void,
   ): void;
   addEventListener(
-    type: "message" | "error",
+    type: "messageerror",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  addEventListener(
+    type: "message" | "error" | "messageerror",
     listener:
       | ((event: MessageEvent<WorkerResponse>) => void)
-      | ((event: ErrorEvent) => void),
+      | ((event: ErrorEvent) => void)
+      | ((event: MessageEvent<unknown>) => void),
   ): void {
     if (type === "message") {
       this.messageListeners.add(
         listener as (event: MessageEvent<WorkerResponse>) => void,
       );
-    } else {
+    } else if (type === "error") {
       this.errorListeners.add(listener as (event: ErrorEvent) => void);
+    } else {
+      this.messageerrorListeners.add(
+        listener as (event: MessageEvent<unknown>) => void,
+      );
     }
   }
 
@@ -52,9 +69,15 @@ class FakeWorker {
     const event = { message, filename: "worker.ts", lineno: 1, colno: 1 } as ErrorEvent;
     for (const listener of this.errorListeners) listener(event);
   }
+
   emitMessage(data: WorkerResponse): void {
     const event = { data } as MessageEvent<WorkerResponse>;
     for (const listener of this.messageListeners) listener(event);
+  }
+
+  emitMessageError(data: unknown = { secret: "SECRET_DATA" }): void {
+    const event = { data } as MessageEvent<unknown>;
+    for (const listener of this.messageerrorListeners) listener(event);
   }
 }
 
@@ -107,6 +130,342 @@ const decodedPair = (): DecodedInputPair => ({
 });
 
 describe("WorkerClient", () => {
+  it("reports worker creation and forwards private runtime diagnostics", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+
+    worker.emitMessage({
+      type: "diagnostic",
+      id,
+      event: { type: "wasm-init-start" },
+    });
+    worker.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+    await pending;
+
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      { type: "wasm-init-start" },
+    ]);
+  });
+
+  it("drops hostile diagnostic packets without changing a valid result", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    const hostilePacket = { type: "diagnostic", id };
+    Object.defineProperty(hostilePacket, "event", {
+      get() {
+        throw new Error("SECRET_EVENT_GETTER");
+      },
+    });
+    const hostileEvent = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error("SECRET_EVENT_PROXY");
+        },
+      },
+    );
+
+    worker.emitMessage(hostilePacket as unknown as WorkerResponse);
+    worker.emitMessage({ type: "diagnostic", id, event: hostileEvent } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+
+    const result = await pending;
+    expect(result.metadata).toEqual(metadata(1));
+    expect(Array.from(new Uint8Array(await result.wav.arrayBuffer()))).toEqual([
+      82, 73, 70, 70,
+    ]);
+    expect(diagnostics).toEqual([{ type: "worker-created" }]);
+  });
+
+  it("reconstructs worker diagnostics from allowlisted own data only", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+
+    worker.emitMessage({
+      type: "diagnostic",
+      id,
+      event: {
+        type: "wasm-init-start",
+        stack: "SECRET_STACK",
+        binary: new Uint8Array([83, 69, 67, 82, 69, 84]),
+        private: "SECRET_PRIVATE",
+      },
+    } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "diagnostic",
+      id,
+      event: {
+        type: "wasm-init-failure",
+        error: {
+          name: "Error",
+          message: "failed core.wasm C:\\private\\take.wav",
+          stack: "SECRET_ERROR_STACK",
+          binary: new Uint8Array([1, 2, 3]),
+          unknown: "SECRET_UNKNOWN",
+        },
+        stack: "SECRET_EVENT_STACK",
+        unknown: "SECRET_EVENT_UNKNOWN",
+      },
+    } as unknown as WorkerResponse);
+    worker.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      metadata: { outputFrames: 1 },
+    });
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      { type: "wasm-init-start" },
+      {
+        type: "wasm-init-failure",
+        error: {
+          name: "Error",
+          message: "failed [redacted-file-name] [redacted-path]",
+        },
+      },
+    ]);
+    const json = JSON.stringify(diagnostics);
+    for (const secret of [
+      "core.wasm",
+      "take.wav",
+      "SECRET_STACK",
+      "SECRET_PRIVATE",
+      "SECRET_UNKNOWN",
+      "SECRET_EVENT",
+      "binary",
+      "unknown",
+    ]) {
+      expect(json).not.toContain(secret);
+    }
+  });
+
+  it("rejects message errors and succeeds with a replacement worker", async () => {
+    const first = new FakeWorker();
+    const second = new FakeWorker();
+    const factory = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(factory, (event) => diagnostics.push(event));
+
+    const failed = client.process(decodedPair(), false, normalizeOptions());
+    expect(first.messageerrorListeners).toHaveLength(1);
+    first.emitMessageError({
+      message: "failed C:\\private\\message.bin",
+      secret: "SECRET_DATA",
+    });
+    await expect(failed).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+
+    const next = client.process(decodedPair(), false, normalizeOptions());
+    const id = second.posts[0]!.message.id;
+    second.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+    await expect(next).resolves.toMatchObject({ metadata: { outputFrames: 1 } });
+
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      {
+        type: "worker-messageerror",
+        error: {
+          name: "DataCloneError",
+          message: "The processing worker emitted an unreadable message",
+        },
+      },
+      { type: "worker-created" },
+    ]);
+  });
+
+  it("reports sanitized worker errors", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const failed = client.process(decodedPair(), false, normalizeOptions());
+
+    worker.emitError("failed C:\\private\\worker.ts");
+    await expect(failed).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      {
+        type: "worker-error",
+        error: {
+          name: "ConvolveError",
+          code: "PROCESSING_FAILED",
+          message: "failed [redacted-path]",
+          lineNumber: 1,
+          columnNumber: 1,
+        },
+      },
+    ]);
+  });
+  it("keeps an observer-started replacement request off the failed worker", async () => {
+    const first = new FakeWorker();
+    const second = new FakeWorker();
+    const factory = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    let replacement: Promise<ConvolveResult> | undefined;
+    let client!: WorkerClient;
+    client = new WorkerClient(factory, (event) => {
+      if (event.type === "worker-error") {
+        replacement = client.process(decodedPair(), false, normalizeOptions());
+        void replacement.catch(() => undefined);
+      }
+    });
+    const failed = client.process(decodedPair(), false, normalizeOptions());
+
+    first.emitError();
+    await expect(failed).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(replacement).toBeDefined();
+    const id = second.posts[0]!.message.id;
+    second.emitMessage({
+      type: "result",
+      id,
+      wav: Uint8Array.from([82, 73, 70, 70]).buffer,
+      metadata: metadata(1),
+    });
+    await expect(replacement).resolves.toMatchObject({
+      metadata: { outputFrames: 1 },
+    });
+  });
+  it("samples aggregate output milestones and reports Blob completion", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    worker.emitMessage({
+      type: "output-start",
+      id,
+      header: validHeader(4).buffer as ArrayBuffer,
+      metadata: metadata(4),
+    });
+    for (let sequence = 0; sequence < 4; sequence += 1) {
+      worker.emitMessage({
+        type: "output-chunk",
+        id,
+        sequence,
+        offset: sequence,
+        frames: 1,
+        pcm: new Uint8Array(6).buffer,
+      });
+    }
+    worker.emitMessage({ type: "result", id, metadata: metadata(4) });
+    const result = await pending;
+
+    expect(result.wav.size).toBe(92);
+    expect(diagnostics).toEqual([
+      { type: "worker-created" },
+      { type: "output-start", outputFrames: 4 },
+      { type: "output-milestone", fraction: 0.25, chunkCount: 1, pcmBytes: 6 },
+      { type: "output-milestone", fraction: 0.5, chunkCount: 2, pcmBytes: 12 },
+      { type: "output-milestone", fraction: 0.75, chunkCount: 3, pcmBytes: 18 },
+      { type: "blob-complete", chunkCount: 4, pcmBytes: 24, wavBytes: 92 },
+    ]);
+  });
+
+  it("cannot let a throwing diagnostic observer change output or metadata", async () => {
+    const worker = new FakeWorker();
+    const observer = vi.fn(() => {
+      throw new Error("diagnostic observer failure");
+    });
+    const client = new WorkerClient(() => worker, observer);
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    const header = validHeader(1);
+    const pcm = Uint8Array.from([1, 2, 3, 4, 5, 6]);
+    worker.emitMessage({
+      type: "output-start",
+      id,
+      header: header.buffer as ArrayBuffer,
+      metadata: metadata(1),
+    });
+    worker.emitMessage({
+      type: "output-chunk",
+      id,
+      sequence: 0,
+      offset: 0,
+      frames: 1,
+      pcm: pcm.buffer,
+    });
+    worker.emitMessage({ type: "result", id, metadata: metadata(1) });
+
+    const result = await pending;
+    expect(result.metadata).toEqual(metadata(1));
+    expect(Array.from(new Uint8Array(await result.wav.arrayBuffer()))).toEqual([
+      ...header,
+      ...pcm,
+    ]);
+    expect(observer).toHaveBeenCalled();
+  });
+  it("reports cancellation once for a failed streamed request", async () => {
+    const worker = new FakeWorker();
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const client = new WorkerClient(
+      () => worker,
+      (event) => diagnostics.push(event),
+    );
+    const pending = client.process(decodedPair(), false, normalizeOptions());
+    const id = worker.posts[0]!.message.id;
+    worker.emitMessage({
+      type: "output-start",
+      id,
+      header: validHeader(2).buffer as ArrayBuffer,
+      metadata: metadata(2),
+    });
+    worker.emitMessage({
+      type: "output-chunk",
+      id,
+      sequence: 0,
+      offset: 1,
+      frames: 1,
+      pcm: new Uint8Array(6).buffer,
+    });
+
+    await expect(pending).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
+    expect(diagnostics.filter(({ type }) => type === "worker-cancelled")).toEqual([
+      { type: "worker-cancelled" },
+    ]);
+  });
   it("creates one worker lazily and routes interleaved responses by request id", async () => {
     const worker = new FakeWorker();
     const factory = vi.fn(() => worker);
@@ -289,7 +648,7 @@ describe("WorkerClient", () => {
     const header = validHeader(1);
     mutate(header);
 
-    worker.emitMessage({ type: "output-start", id, header: header.buffer, metadata: metadata(1) });
+    worker.emitMessage({ type: "output-start", id, header: header.buffer as ArrayBuffer, metadata: metadata(1) });
 
     await expect(pending).rejects.toMatchObject({ code: "PROCESSING_FAILED" });
     expect(worker.posts.at(-1)?.message).toMatchObject({ type: "cancel", id });

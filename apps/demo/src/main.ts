@@ -6,6 +6,7 @@ import {
 } from "@takana-labs/convolve-wasm";
 
 import { formatConvolveError } from "./error-message";
+import { createBrowserDiagnostics } from "./diagnostics/browser";
 import "./styles.css";
 import "./footer-icons.css";
 
@@ -28,6 +29,7 @@ const run = element<HTMLButtonElement>("#run");
 const status = element<HTMLOutputElement>("#status");
 const preview = element<HTMLAudioElement>("#preview");
 const download = element<HTMLAnchorElement>("#download");
+const diagnostics = createBrowserDiagnostics();
 
 let resultUrl: string | undefined;
 
@@ -66,9 +68,33 @@ function revokeResultUrl(): void {
 run.addEventListener("click", async () => {
   const a = audioA.files?.[0];
   const b = audioB.files?.[0];
+  const options = {
+    appendReverse: appendReverse.checked,
+    beatPan: selectedBeatPan(),
+    panTransitionMs: numericValue(panTransitionMs),
+    reverseCrossfadeMs: numericValue(reverseCrossfadeMs),
+    targetDbtp: numericValue(targetDbtp),
+  };
+  diagnostics.showFailureAction(false);
+  diagnostics.startAttempt({
+    inputs: [
+      ...(a
+        ? [{ slot: "a" as const, mimeType: a.type, encodedBytes: a.size }]
+        : []),
+      ...(b
+        ? [{ slot: "b" as const, mimeType: b.type, encodedBytes: b.size }]
+        : []),
+    ],
+    options,
+  });
   clearMetadata();
   if (!a || !b) {
     setStatus("error", "INVALID_INPUT: Select both Audio A and Audio B.");
+    diagnostics.finishFailure({
+      code: "INVALID_INPUT",
+      message: "Select both Audio A and Audio B.",
+    });
+    diagnostics.showFailureAction(true);
     return;
   }
 
@@ -82,12 +108,14 @@ run.addEventListener("click", async () => {
   setStatus("processing", "Preparing audio…");
 
   try {
-    const result = await CONVOLVE({ a, b }, appendReverse.checked, {
-      beatPan: selectedBeatPan(),
-      panTransitionMs: numericValue(panTransitionMs),
-      reverseCrossfadeMs: numericValue(reverseCrossfadeMs),
-      targetDbtp: numericValue(targetDbtp),
-      onProgress: ({ stage, fraction }) => {
+    const result = await CONVOLVE({ a, b }, options.appendReverse, {
+      beatPan: options.beatPan,
+      panTransitionMs: options.panTransitionMs,
+      reverseCrossfadeMs: options.reverseCrossfadeMs,
+      targetDbtp: options.targetDbtp,
+      onProgress: (event) => {
+        diagnostics.recordProgress(event);
+        const { stage, fraction } = event;
         const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
         setStatus("processing", `${stage} · ${percent}%`);
       },
@@ -99,6 +127,7 @@ run.addEventListener("click", async () => {
     download.href = resultUrl;
     download.download = "convolved-audio.wav";
     download.setAttribute("aria-disabled", "false");
+    diagnostics.previewAssigned(result.wav.size);
     exposeMetadata(result.metadata);
     const beats = `${result.metadata.detectedBeats} detected beat${
       result.metadata.detectedBeats === 1 ? "" : "s"
@@ -107,13 +136,18 @@ run.addEventListener("click", async () => {
       "done",
       `Done · ${result.metadata.outputFrames} frames · ${beats} · ${result.metadata.estimatedTruePeakDbtp.toFixed(2)} dBTP`,
     );
+    diagnostics.finishSuccess(result.metadata);
+    diagnostics.showFailureAction(false);
   } catch (error) {
     if (error instanceof ConvolveError) {
       setStatus("error", formatConvolveError(error));
+      diagnostics.finishFailure(error);
     } else {
       const message = error instanceof Error ? error.message : "Unknown error";
       setStatus("error", `PROCESSING_FAILED: ${message}`);
+      diagnostics.finishFailure(error);
     }
+    diagnostics.showFailureAction(true);
   } finally {
     run.disabled = false;
   }

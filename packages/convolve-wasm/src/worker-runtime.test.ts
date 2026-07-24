@@ -71,17 +71,21 @@ describe("worker request runtime", () => {
     expect(loadWasm).toHaveBeenCalledTimes(1);
     expect(processAudio).toHaveBeenCalledTimes(2);
     expect(free).toHaveBeenCalledTimes(2);
-    expect(posts[0]?.response).toEqual({
-      type: "progress",
-      id: "one",
-      event: { stage: "load-wasm", fraction: 0.25 },
-    });
-    expect(posts[1]?.response).toEqual({
+    expect(posts.slice(0, 3).map(({ response }) => response)).toEqual([
+      {
+        type: "progress",
+        id: "one",
+        event: { stage: "load-wasm", fraction: 0.25 },
+      },
+      { type: "diagnostic", id: "one", event: { type: "wasm-init-start" } },
+      { type: "diagnostic", id: "one", event: { type: "wasm-init-success" } },
+    ]);
+    expect(posts[3]?.response).toEqual({
       type: "progress",
       id: "one",
       event: { stage: "validate", fraction: 0.3 },
     });
-    const firstResult = posts[2];
+    const firstResult = posts[4];
     expect(firstResult?.response).toMatchObject({
       type: "result",
       id: "one",
@@ -100,6 +104,76 @@ describe("worker request runtime", () => {
     expect(Array.from(new Uint8Array(firstResult.response.wav))).toEqual([
       82, 73, 70, 70,
     ]);
+  });
+
+  it("keeps progress, result, metadata, and cleanup unchanged when only diagnostic delivery throws", async () => {
+    const free = vi.fn();
+    const posts: WorkerResponse[] = [];
+    const handle = createWorkerRequestHandler({
+      loadWasm: async () => ({
+        process_audio_wasm: (
+          _aLeft: Float32Array,
+          _aRight: Float32Array,
+          _bLeft: Float32Array,
+          _bRight: Float32Array,
+          _appendReverse: boolean,
+          _options: unknown,
+          progress?: (stage: string, fraction: number) => void,
+        ) => {
+          progress?.("validate", 0.3);
+          return {
+            sampleRate: 48_000,
+            channels: 2,
+            durationSeconds: 1 / 48_000,
+            outputFrames: 1,
+            detectedBeats: 0,
+            detectedBpm: undefined,
+            beatConfidence: undefined,
+            appliedGainDb: 0,
+            estimatedTruePeakDbtp: -1,
+            wav_bytes: () => Uint8Array.from([82, 73, 70, 70]),
+            free,
+          };
+        },
+      }),
+      postMessage: (response) => {
+        if (response.type === "diagnostic") {
+          throw new Error("diagnostic delivery failed");
+        }
+        posts.push(response);
+      },
+    });
+
+    await expect(handle(request("diagnostic-failure"))).resolves.toBeUndefined();
+    expect(posts).toEqual([
+      {
+        type: "progress",
+        id: "diagnostic-failure",
+        event: { stage: "load-wasm", fraction: 0.25 },
+      },
+      {
+        type: "progress",
+        id: "diagnostic-failure",
+        event: { stage: "validate", fraction: 0.3 },
+      },
+      {
+        type: "result",
+        id: "diagnostic-failure",
+        wav: expect.any(ArrayBuffer),
+        metadata: {
+          sampleRate: 48_000,
+          channels: 2,
+          durationSeconds: 1 / 48_000,
+          outputFrames: 1,
+          detectedBeats: 0,
+          detectedBpm: null,
+          beatConfidence: null,
+          appliedGainDb: 0,
+          estimatedTruePeakDbtp: -1,
+        },
+      },
+    ]);
+    expect(free).toHaveBeenCalledOnce();
   });
 
   it("preserves structured processing failures and classifies init failures", async () => {
@@ -130,19 +204,29 @@ describe("worker request runtime", () => {
     const initPosts: WorkerResponse[] = [];
     const initFailure = createWorkerRequestHandler({
       loadWasm: async () => {
-        throw new Error("network blocked");
+        throw new Error("failed C:\\private\\core.wasm");
       },
       postMessage: (response) => initPosts.push(response),
     });
     await initFailure(request("init"));
-    expect(initPosts.at(-1)).toEqual({
-      type: "error",
-      id: "init",
-      error: {
-        code: "WASM_INIT_FAILED",
-        message: "network blocked",
+    expect(initPosts.slice(-2)).toEqual([
+      {
+        type: "diagnostic",
+        id: "init",
+        event: {
+          type: "wasm-init-failure",
+          error: { message: "failed [redacted-path]" },
+        },
       },
-    });
+      {
+        type: "error",
+        id: "init",
+        error: {
+          code: "WASM_INIT_FAILED",
+          message: "failed C:\\private\\core.wasm",
+        },
+      },
+    ]);
   });
 
   it("copies input into a two-phase job, releases request channels, and streams one transferred chunk", async () => {

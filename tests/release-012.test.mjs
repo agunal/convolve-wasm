@@ -111,3 +111,24 @@ test("v0.1.2 evidence makes both private-pair scenarios reproducible", async () 
     /`appendReverse` and `reverseCrossfadeMs` affect `finalFrames` and the memory estimate[\s\S]*`beatPan`, `panTransitionMs`, and `targetDbtp` are DSP-only and do not change the estimate/,
   );
 });
+
+test("mobile diagnostics documentation states its privacy and inference boundary", async () => {
+  const [guide, readme, architecture, browserSupport] = await Promise.all([
+    source("docs/mobile-crash-diagnostics.md"),
+    source("README.md"),
+    source("docs/architecture.md"),
+    source("docs/browser-support.md"),
+  ]);
+  for (const statement of [
+    "No audio bytes, samples, filenames, paths, or Blob URLs",
+    "6 sessions",
+    "32 KiB",
+    "96 checkpoints",
+    "does not prove an out-of-memory event",
+    "Chrome remote debugging",
+    "adb logcat",
+  ]) assert.ok(guide.includes(statement), statement);
+  assert.ok(readme.includes("docs/mobile-crash-diagnostics.md"));
+  assert.ok(architecture.includes("demo-only diagnostic recorder"));
+  assert.ok(browserSupport.includes("unexpected-termination"));
+});

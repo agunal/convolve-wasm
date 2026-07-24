@@ -67,6 +67,12 @@ The independent streaming Rust/WASM guard stays exactly 256 MiB and models `D + 
 
 The encoder preserves the 68-byte `WAVE_FORMAT_EXTENSIBLE` header and emits interleaved stereo 48 kHz signed 24-bit PCM. It emits ordered chunks of at most 65,536 frames; `W = 68 + 6 * finalFrames`. PCM rounding remains byte-compatible with prior full-engine output.
 
+## Demo-only diagnostic recorder
+
+The hosted demo includes a demo-only diagnostic recorder that writes allow-listed, sanitized lifecycle checkpoints to origin-local `localStorage`. It stores a bounded session ring and a separate active-session marker so that local checkpoints can be recovered after a same-origin reload.
+
+The recorder is observational and best effort: storage, export, or clipboard failures cannot change convolution processing. It records no audio data and has no upload or server-side telemetry path. The canonical [mobile crash diagnostics guide](mobile-crash-diagnostics.md) defines its schema/export v1 limits, privacy boundary, recovery inference, and Android workflow.
+
 ## Distribution and licensing
 
 The project is MIT licensed and deliberately excludes prebuilt `@ffmpeg/core`. Browser-native decoding keeps the shipped library focused on one project-owned WASM DSP runtime; a future deterministic M4A decoder must be optional and separately reviewed.

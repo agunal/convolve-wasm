@@ -69,7 +69,22 @@ test("desktop presents the embossed stone visual system", async ({ page }) => {
   await expect(page.locator(".download .ui-icon")).toHaveCount(1);
   await expect(page.locator(".control-label .ui-icon")).toHaveCount(4);
   await expect(page.locator(".site-footer .ui-icon")).toHaveCount(5);
+  await expect(page.locator("#diagnostics")).toBeVisible();
+  const diagnosticsBadge = await page.locator("#diagnostics .section-heading .step")
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        width: element.getBoundingClientRect().width,
+        paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+        paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
+      };
+    });
+  expect(diagnosticsBadge.width).toBeGreaterThan(80);
+  expect(diagnosticsBadge.paddingInlineStart).toBeGreaterThanOrEqual(10);
+  expect(diagnosticsBadge.paddingInlineEnd).toBeGreaterThanOrEqual(10);
   await expectTouchTarget(page, "#run");
+  await expectTouchTarget(page, "#diagnostics-download");
+  await expectTouchTarget(page, "#diagnostics-clear");
   await expectTouchTarget(page, ".footer-links a");
   await expectTouchTarget(page, ".bluesky-link");
   await assertNoHorizontalOverflow(page);
@@ -84,12 +99,16 @@ test("phone layout stays contained and stacks section headings", async ({
 
   await expect(page.locator(".brand-mark")).toBeVisible();
   await expect(page.locator("#run")).toBeVisible();
+  await expect(page.locator("#diagnostics")).toBeVisible();
   await assertNoHorizontalOverflow(page);
 
   expect(await gridColumnCount(page, ".hero")).toBe(1);
   expect(await gridColumnCount(page, ".section-heading")).toBe(1);
   expect(await gridColumnCount(page, ".footer-grid")).toBe(1);
+  expect(await gridColumnCount(page, ".diagnostics-actions")).toBe(1);
   await expectTouchTarget(page, "#run");
+  await expectTouchTarget(page, "#diagnostics-download");
+  await expectTouchTarget(page, "#diagnostics-clear");
   await expectTouchTarget(page, "input[type=file]");
   await expectTouchTarget(page, ".footer-links a");
   await expectTouchTarget(page, ".bluesky-link");
@@ -103,9 +122,13 @@ test("tablet layout stacks dense controls and result actions", async ({
   await selectLongNames(page);
 
   await assertNoHorizontalOverflow(page);
+  await expect(page.locator("#diagnostics")).toBeVisible();
   for (const selector of [".file-grid", ".controls-grid", ".result-actions"]) {
     expect(await gridColumnCount(page, selector)).toBe(1);
   }
+  expect(await gridColumnCount(page, ".diagnostics-actions")).toBe(1);
   await expectTouchTarget(page, ".download");
+  await expectTouchTarget(page, "#diagnostics-download");
+  await expectTouchTarget(page, "#diagnostics-clear");
   await expectTouchTarget(page, ".footer-links a");
 });

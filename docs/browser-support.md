@@ -12,6 +12,13 @@ This is not yet an official Android-completion claim. Both the immutable [v0.1.1
 - A decode failure returns `DECODE_FAILED`; there is no upload, server fallback, or bundled FFmpeg decoder.
 - Processing is single-threaded WASM in a dedicated worker and does not require `SharedArrayBuffer`, COOP, or COEP headers.
 - Browser budgets range from 64 MiB to 384 MiB using the reported `navigator.deviceMemory` class; the independent 256 MiB Rust/WASM guard remains active.
+
+## Android local diagnostics
+
+The hosted demo keeps bounded, same-origin diagnostic checkpoints for Android investigation. On the next load, an active record without a terminal completion or clean-shutdown boundary is marked `unexpected-termination`; this is an inference rather than proof of OOM, a browser crash, or an exact system cause. Reopen the same site promptly to review and export it, then combine it with Chrome remote debugging or `adb logcat` when available.
+
+See [mobile crash diagnostics](mobile-crash-diagnostics.md) for the collection boundary, retention limits, recovery meaning, clearing behavior, and Android report workflow.
+
 ## Automated WAV validation
 
 Local-container evidence and GitHub Actions evidence are recorded separately. Browser availability in one environment does not describe what ran in another.

@@ -1,4 +1,5 @@
 import type { DecodedStereoAudio } from "./decode";
+import type { SafeDiagnosticError } from "./diagnostics";
 import type { ConvolveErrorCode } from "./errors";
 import type { NormalizedConvolveOptions } from "./options";
 import type { ConvolveMetadata, ConvolveProgress } from "./types";
@@ -7,6 +8,10 @@ export const PCM24_CHUNK_FRAMES = 65_536;
 export const WAV_HEADER_BYTES = 68;
 export type WorkerProcessOptions = Omit<NormalizedConvolveOptions, "onProgress">;
 
+export type WorkerDiagnosticEvent =
+  | { type: "wasm-init-start" }
+  | { type: "wasm-init-success" }
+  | { type: "wasm-init-failure"; error: SafeDiagnosticError };
 export interface SerializedConvolveError {
   code: ConvolveErrorCode;
   message: string;
@@ -44,6 +49,7 @@ export type WorkerRequest =
 
 export type WorkerResponse =
   | { type: "progress"; id: string; event: ConvolveProgress }
+  | { type: "diagnostic"; id: string; event: WorkerDiagnosticEvent }
   | {
       type: "output-start";
       id: string;

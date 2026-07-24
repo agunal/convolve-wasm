@@ -20,6 +20,7 @@
     <meta property="og:type" content="website" />
     <link rel="canonical" href="%PUBLIC_SITE_URL%" />
     <meta name="convolve-build" content="%BUILD_SHA%" />
+    <meta name="convolve-version" content="%APP_VERSION%" />
     <meta
       property="og:url"
       content="%PUBLIC_SITE_URL%"
@@ -263,6 +264,9 @@
 
       <section class="result-panel" aria-live="polite">
         <output id="status" data-state="idle">Ready for two files.</output>
+        <button id="failure-diagnostics-download" type="button" hidden>
+          Download diagnostics
+        </button>
         <div class="result-actions">
           <audio id="preview" controls preload="metadata"></audio>
           <a id="download" class="download" aria-disabled="true">
@@ -270,6 +274,47 @@
             <span>Download WAV</span>
           </a>
         </div>
+      </section>
+
+      <section id="diagnostics" class="diagnostics-panel" aria-labelledby="diagnostics-heading">
+        <div class="section-heading">
+          <p class="step">Diagnostics</p>
+          <div>
+            <h2 id="diagnostics-heading">Local crash diagnostics</h2>
+            <p>
+              No audio data, samples, filenames, or paths are recorded. Nothing is
+              uploaded; records stay in this browser until you export or clear them.
+            </p>
+          </div>
+        </div>
+        <p id="diagnostics-storage" class="diagnostics-storage" role="status"></p>
+        <div id="diagnostics-recovered" class="diagnostics-recovered" hidden>
+          A previous session ended without a normal completion marker. This is an
+          unexpected termination inference (recorded as unexpected-termination);
+          it does not prove an out-of-memory event
+          or identify Chrome's exact reason.
+          If only the active marker was recovered, detailed checkpoints were unavailable.
+        </div>
+        <p id="diagnostics-summary" class="diagnostics-summary">
+          No retained diagnostic sessions.
+        </p>
+        <div class="diagnostics-actions">
+          <button id="diagnostics-download" type="button">Download diagnostics</button>
+          <button id="diagnostics-copy" type="button" hidden>Copy diagnostics</button>
+          <button id="diagnostics-clear" type="button">Clear diagnostics</button>
+        </div>
+        <details class="diagnostics-help">
+          <summary>Collect an Android crash report</summary>
+          <ol>
+            <li>Run the files and options that previously reloaded or closed the tab.</li>
+            <li>Reopen this page immediately after Chrome reloads or terminates it.</li>
+            <li>Download or copy the recovered record before clearing or retrying.</li>
+          </ol>
+          <p>
+            JavaScript cannot record the exact instant or system reason Chrome kills
+            a renderer.
+          </p>
+        </details>
       </section>
 
       <section id="about" class="about-panel" aria-labelledby="about-heading">

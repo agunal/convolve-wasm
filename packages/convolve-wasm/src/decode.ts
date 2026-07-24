@@ -1,3 +1,8 @@
+import {
+  notifyDiagnostic,
+  safeDiagnosticError,
+  type DiagnosticObserver,
+} from "./diagnostics";
 import { ConvolveError } from "./errors";
 import type { ConvolveProgress } from "./types";
 
@@ -18,6 +23,14 @@ export type DecodedInputPair = {
 };
 
 const SUPPORTED_EXTENSIONS = new Set([".wav", ".m4a"]);
+const DIAGNOSTIC_MIME_TYPES = new Set([
+  "audio/mp4",
+  "audio/vnd.wave",
+  "audio/wav",
+  "audio/wave",
+  "audio/x-m4a",
+  "audio/x-wav",
+]);
 
 export function validateSupportedExtension(fileName: string): void {
   const dot = fileName.lastIndexOf(".");
@@ -109,14 +122,56 @@ export function getDefaultDecodeBackend(): WebAudioDecodeBackend {
   ));
 }
 
+function diagnosticMimeType(value: string): string {
+  const essence = value
+    .slice(0, 120)
+    .split(";", 1)[0]!
+    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+    .trim()
+    .toLowerCase();
+  return DIAGNOSTIC_MIME_TYPES.has(essence) ? essence : "";
+}
+async function decodeInput(
+  slot: "a" | "b",
+  file: File,
+  backend: AudioDecodeBackend,
+  diagnostics: DiagnosticObserver | undefined,
+): Promise<DecodedStereoAudio> {
+  notifyDiagnostic(diagnostics, {
+    type: "decode-start",
+    slot,
+    mimeType: diagnosticMimeType(file.type),
+    encodedBytes: file.size,
+  });
+  try {
+    const decoded = await backend.decode(file);
+    notifyDiagnostic(diagnostics, {
+      type: "decode-success",
+      slot,
+      sampleRate: decoded.sampleRate,
+      channels: 2,
+      frames: decoded.frames,
+    });
+    return decoded;
+  } catch (cause) {
+    notifyDiagnostic(diagnostics, {
+      type: "decode-failure",
+      slot,
+      error: safeDiagnosticError(cause),
+    });
+    throw cause;
+  }
+}
+
 export async function decodeInputPair(
   audio: { a: File; b: File },
   backend: AudioDecodeBackend,
   onProgress?: (event: ConvolveProgress) => void,
+  diagnostics?: DiagnosticObserver,
 ): Promise<DecodedInputPair> {
-  const a = await backend.decode(audio.a);
+  const a = await decodeInput("a", audio.a, backend, diagnostics);
   onProgress?.({ stage: "decode-a", fraction: 0.1 });
-  const b = await backend.decode(audio.b);
+  const b = await decodeInput("b", audio.b, backend, diagnostics);
   onProgress?.({ stage: "decode-b", fraction: 0.2 });
   return { a, b };
 }

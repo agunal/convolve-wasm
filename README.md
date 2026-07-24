@@ -114,4 +114,4 @@ Lifecycle logs append under `app_work/runtime/`. Hidden start builds the demo, s
 
 Generated wasm-bindgen files under `packages/convolve-wasm/src/wasm/` are build artifacts and are not committed.
 
-See [architecture](docs/architecture.md) and [browser support](docs/browser-support.md) for implementation details and release checks.
+See [architecture](docs/architecture.md), [browser support](docs/browser-support.md), and [mobile crash diagnostics](docs/mobile-crash-diagnostics.md) for implementation details, Android recovery guidance, and release checks.

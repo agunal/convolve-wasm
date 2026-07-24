@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { ConvolveDiagnosticEvent } from "./diagnostics";
 import { ConvolveError } from "./errors";
 import {
   WebAudioDecodeBackend,
@@ -115,6 +116,7 @@ describe("Web Audio decoding", () => {
 
   it("decodes A then B and emits completed decode progress", async () => {
     const order: string[] = [];
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
     const backend = {
       async decode(file: File) {
         order.push(file.name);
@@ -129,23 +131,190 @@ describe("Web Audio decoding", () => {
 
     const result = await decodeInputPair(
       {
-        a: new File([new Uint8Array([1])], "a.wav"),
-        b: new File([new Uint8Array([1])], "b.wav"),
+        a: new File([new Uint8Array([1])], "private-a.wav", {
+          type: "audio/wav",
+        }),
+        b: new File([new Uint8Array([1, 2])], "private-b.m4a", {
+          type: "audio/mp4",
+        }),
       },
       backend,
       (event) => order.push(`${event.stage}:${event.fraction}`),
+      (event) => diagnostics.push(event),
     );
 
     expect(order).toEqual([
-      "a.wav",
+      "private-a.wav",
       "decode-a:0.1",
-      "b.wav",
+      "private-b.m4a",
       "decode-b:0.2",
     ]);
+    expect(diagnostics).toEqual([
+      {
+        type: "decode-start",
+        slot: "a",
+        mimeType: "audio/wav",
+        encodedBytes: 1,
+      },
+      {
+        type: "decode-success",
+        slot: "a",
+        sampleRate: 48_000,
+        channels: 2,
+        frames: 1,
+      },
+      {
+        type: "decode-start",
+        slot: "b",
+        mimeType: "audio/mp4",
+        encodedBytes: 2,
+      },
+      {
+        type: "decode-success",
+        slot: "b",
+        sampleRate: 48_000,
+        channels: 2,
+        frames: 1,
+      },
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("private-a.wav");
     expect(result.a.frames).toBe(1);
     expect(result.b.frames).toBe(1);
   });
 
+  it("reports a sanitized decode failure and preserves the rejection object", async () => {
+    const failure = {
+      name: "EncodingError",
+      message: "failed C:\\private\\broken.m4a",
+      stack: "SECRET_STACK",
+      details: { estimatedBytes: 123, secret: "SECRET_DETAIL" },
+    };
+    const backend = {
+      decode: vi.fn().mockRejectedValue(failure),
+    };
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+
+    await expect(
+      decodeInputPair(
+        {
+          a: new File([new Uint8Array([1])], "private-a.wav", {
+            type: "audio/wav",
+          }),
+          b: new File([new Uint8Array([2])], "private-b.m4a", {
+            type: "audio/mp4",
+          }),
+        },
+        backend,
+        undefined,
+        (event) => diagnostics.push(event),
+      ),
+    ).rejects.toBe(failure);
+
+    expect(diagnostics).toEqual([
+      {
+        type: "decode-start",
+        slot: "a",
+        mimeType: "audio/wav",
+        encodedBytes: 1,
+      },
+      {
+        type: "decode-failure",
+        slot: "a",
+        error: {
+          name: "EncodingError",
+          message: "failed [redacted-path]",
+          details: { estimatedBytes: 123 },
+        },
+      },
+    ]);
+  });
+
+  it("does not expose adversarial MIME text in decode events", async () => {
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const backend = {
+      async decode() {
+        return {
+          sampleRate: 48_000 as const,
+          frames: 1,
+          left: new Float32Array([1]),
+          right: new Float32Array([1]),
+        };
+      },
+    };
+
+    await decodeInputPair(
+      {
+        a: new File([new Uint8Array([1])], "private-a.wav", {
+          type: "blob:https://private.example/id",
+        }),
+        b: new File([new Uint8Array([2])], "private-b.wav", {
+          type: "audio/wav",
+        }),
+      },
+      backend,
+      undefined,
+      (event) => diagnostics.push(event),
+    );
+
+    expect(diagnostics[0]).toEqual({
+      type: "decode-start",
+      slot: "a",
+      mimeType: "",
+      encodedBytes: 1,
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain("private.example");
+  });
+
+  it("emits only safe allowlisted MIME essences", async () => {
+    const diagnostics: ConvolveDiagnosticEvent[] = [];
+    const backend = {
+      async decode() {
+        return {
+          sampleRate: 48_000 as const,
+          frames: 1,
+          left: new Float32Array([1]),
+          right: new Float32Array([1]),
+        };
+      },
+    };
+
+    await decodeInputPair(
+      {
+        a: new File([new Uint8Array([1])], "private-a.wav", {
+          type: "audio/wav;name=private-take.wav",
+        }),
+        b: new File([new Uint8Array([2])], "private-b.m4a", {
+          type: "private-take.wav/audio",
+        }),
+      },
+      backend,
+      undefined,
+      (event) => diagnostics.push(event),
+    );
+
+    expect(
+      diagnostics.filter(
+        (event): event is Extract<
+          ConvolveDiagnosticEvent,
+          { type: "decode-start" }
+        > => event.type === "decode-start",
+      ),
+    ).toEqual([
+      {
+        type: "decode-start",
+        slot: "a",
+        mimeType: "audio/wav",
+        encodedBytes: 1,
+      },
+      {
+        type: "decode-start",
+        slot: "b",
+        mimeType: "",
+        encodedBytes: 1,
+      },
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("private-take.wav");
+  });
   it("does not double-wrap typed decoding errors", async () => {
     const typed = new ConvolveError("UNSUPPORTED_CHANNEL_COUNT", "too many");
     const backend = makeBackend(Promise.reject(typed));

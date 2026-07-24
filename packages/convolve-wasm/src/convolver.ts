@@ -3,6 +3,11 @@ import {
   type AudioDecodeBackend,
   type DecodedInputPair,
 } from "./decode";
+import {
+  notifyDiagnostic,
+  safeDiagnosticError,
+  type DiagnosticObserver,
+} from "./diagnostics";
 import { ConvolveError } from "./errors";
 import {
   browserMemoryBudget,
@@ -24,6 +29,7 @@ export interface ConvolverWorkerClient {
 export interface ConvolverDependencies {
   getDecodeBackend(): AudioDecodeBackend;
   getMemoryBudget?(): MemoryBudget;
+  diagnostics?: DiagnosticObserver;
   workerClient: ConvolverWorkerClient;
 }
 
@@ -61,6 +67,7 @@ export function createConvolver(dependencies: ConvolverDependencies) {
       audio,
       dependencies.getDecodeBackend(),
       normalized.onProgress,
+      dependencies.diagnostics,
     );
     const reverseCrossfadeFrames = millisecondsToFrames(
       normalized.reverseCrossfadeMs,
@@ -75,6 +82,21 @@ export function createConvolver(dependencies: ConvolverDependencies) {
     });
     const memoryBudget =
       dependencies.getMemoryBudget?.() ?? browserMemoryBudget();
+    notifyDiagnostic(dependencies.diagnostics, {
+      type: "memory-plan",
+      estimatedBytes: memoryPlan.estimatedBytes,
+      limitBytes: memoryBudget.budgetBytes,
+      aFrames: decoded.a.frames,
+      bFrames: decoded.b.frames,
+      outputFrames: memoryPlan.outputFrames,
+      finalFrames: memoryPlan.finalFrames,
+      fftFrames: memoryPlan.fftFrames,
+      appendReverse,
+      reverseCrossfadeFrames,
+      beatPan: normalized.beatPan,
+      deviceMemoryGiB: memoryBudget.deviceMemoryGiB,
+      admitted: memoryPlan.estimatedBytes <= memoryBudget.budgetBytes,
+    });
     if (memoryPlan.estimatedBytes > memoryBudget.budgetBytes) {
       throw new ConvolveError(
         "INPUT_TOO_LARGE",
@@ -106,27 +128,49 @@ export function createConvolver(dependencies: ConvolverDependencies) {
     appendReverse = false,
     options: ConvolveOptions = {},
   ): Promise<ConvolveResult> {
-    validateAudioInputObject(audio);
-    if (typeof appendReverse !== "boolean") {
-      throw new ConvolveError(
-        "INVALID_INPUT",
-        "appendReverse must be a boolean",
-        { appendReverse },
-      );
-    }
+    try {
+      validateAudioInputObject(audio);
+      if (typeof appendReverse !== "boolean") {
+        throw new ConvolveError(
+          "INVALID_INPUT",
+          "appendReverse must be a boolean",
+          { appendReverse },
+        );
+      }
 
-    const normalized = normalizeOptions(options);
-    const submittedAudio = {
-      a: audio.a,
-      b: audio.b,
-    };
-    const result = renderQueue.then(() =>
-      convolveOnce(submittedAudio, appendReverse, normalized),
-    );
-    renderQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+      const normalized = normalizeOptions(options);
+      const submittedAudio = {
+        a: audio.a,
+        b: audio.b,
+      };
+      const result = renderQueue.then(() =>
+        convolveOnce(submittedAudio, appendReverse, normalized),
+      );
+      renderQueue = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      notifyDiagnostic(dependencies.diagnostics, {
+        type: "options",
+        appendReverse,
+        beatPan: normalized.beatPan,
+        panTransitionMs: normalized.panTransitionMs,
+        reverseCrossfadeMs: normalized.reverseCrossfadeMs,
+        targetDbtp: normalized.targetDbtp,
+      });
+      const completed = await result;
+      notifyDiagnostic(dependencies.diagnostics, {
+        type: "request-success",
+        outputFrames: completed.metadata.outputFrames,
+        durationSeconds: completed.metadata.durationSeconds,
+      });
+      return completed;
+    } catch (cause) {
+      notifyDiagnostic(dependencies.diagnostics, {
+        type: "request-failure",
+        error: safeDiagnosticError(cause),
+      });
+      throw cause;
+    }
   };
 }

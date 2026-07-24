@@ -1,3 +1,4 @@
+import { safeDiagnosticError } from "./diagnostics";
 import type { ConvolveErrorCode } from "./errors";
 import type { ConvolveMetadata, ConvolveStage } from "./types";
 import {
@@ -7,6 +8,7 @@ import {
   type PullOutputRequest,
   type SerializedConvolveError,
   type WorkerProcessRequest,
+  type WorkerDiagnosticEvent,
   type WorkerRequest,
   type WorkerResponse,
 } from "./worker-protocol";
@@ -178,7 +180,43 @@ export function createWorkerRequestHandler(
   dependencies: WorkerRuntimeDependencies,
 ): (request: WorkerRequest) => Promise<void> {
   let wasmPromise: Promise<WasmModuleLike> | undefined;
-  const getWasm = () => (wasmPromise ??= dependencies.loadWasm());
+
+  function reportDiagnostic(id: string, event: WorkerDiagnosticEvent): void {
+    try {
+      dependencies.postMessage({ type: "diagnostic", id, event });
+    } catch {
+      // Diagnostic delivery cannot affect worker processing.
+    }
+  }
+
+  function getWasm(id: string): Promise<WasmModuleLike> {
+    if (wasmPromise) return wasmPromise;
+
+    reportDiagnostic(id, { type: "wasm-init-start" });
+    try {
+      const loading = dependencies.loadWasm();
+      wasmPromise = loading.then(
+        (module) => {
+          reportDiagnostic(id, { type: "wasm-init-success" });
+          return module;
+        },
+        (cause) => {
+          reportDiagnostic(id, {
+            type: "wasm-init-failure",
+            error: safeDiagnosticError(cause),
+          });
+          throw cause;
+        },
+      );
+    } catch (cause) {
+      reportDiagnostic(id, {
+        type: "wasm-init-failure",
+        error: safeDiagnosticError(cause),
+      });
+      throw cause;
+    }
+    return wasmPromise;
+  }
   const queued: WorkerProcessRequest[] = [];
   let active: ActiveOutput | undefined;
   let starting: StartingOutput | undefined;
@@ -234,7 +272,7 @@ export function createWorkerRequestHandler(
 
       let wasm: WasmModuleLike;
       try {
-        wasm = await getWasm();
+        wasm = await getWasm(request.id);
       } catch (cause) {
         if (!start.cancelled) {
           fail(
