@@ -3,6 +3,7 @@ import {
   sanitizeEnvironmentText,
   sanitizePlatformText,
   sanitizeError,
+  sanitizeBareMimeType,
   sanitizeSensitiveText,
 } from "./sanitize";
 
@@ -92,21 +93,12 @@ export function copyInputs(value: unknown): BrowserAttemptInput["inputs"] {
     ) {
       result.push({
         slot,
-        mimeType: safeMimeType(mimeType),
+        mimeType: sanitizeBareMimeType(mimeType),
         encodedBytes,
       });
     }
   }
   return result;
-}
-
-function safeMimeType(value: string): string {
-  const bounded = value.slice(0, MAX_META_LENGTH)
-    .replace(/[\u0000-\u001f\u007f]/gu, "")
-    .trim();
-  return /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(bounded)
-    ? bounded
-    : "";
 }
 
 export function copyOptions(value: unknown): BrowserAttemptInput["options"] {

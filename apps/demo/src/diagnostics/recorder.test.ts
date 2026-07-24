@@ -431,6 +431,21 @@ class ToggleFailureStorage extends FakeStorage {
     },
   );
 
+  it.each(["audio/private-recording.mp3", "audio/private-recording.flac", "audio/private-recording.7z"])(
+    "does not retain filename-shaped MIME essence %s in storage or export",
+    (mimeType) => {
+      const storage = new FakeStorage();
+      const recorder = makeRecorder(storage);
+      const input = startInput("bare-mime-privacy");
+      input.inputs = [{ slot: "a", mimeType, encodedBytes: 1 }];
+      recorder.startSession(input);
+      const raw = storage.getItem(DIAGNOSTIC_STORE_KEY) ?? "";
+      const exported = recorder.exportJson();
+      expect(raw).not.toContain("private-recording");
+      expect(exported).not.toContain("private-recording");
+    },
+  );
+
   it.each([
     ["corrupt JSON", "{not-json", "recovered-corruption"],
     [

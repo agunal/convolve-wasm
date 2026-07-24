@@ -376,9 +376,16 @@ describe("browser diagnostics", () => {
     const recorder = actualRecorder(storage);
     const dependencies = browserDependencies(recorder);
     const diagnostics = createBrowserDiagnostics(dependencies);
-    const sentinels = ["private.mp3", "private.flac", "private.pdf", "private.7z"];
+    const sentinels = ["private.mp3", "private.flac", "private.pdf", "private.7z", "private-recording"];
 
     diagnostics.startAttempt(validAttempt());
+    diagnostics.handlePackageEvent({
+      type: "decode-start",
+      slot: "a",
+      mimeType: "audio/private-recording.mp3",
+      encodedBytes: 1,
+      hostilePrivateField: "private-recording",
+    });
     diagnostics.handleWindowError({ message: `window ${sentinels[0]}` });
     diagnostics.handleUnhandledRejection({ reason: { message: `promise ${sentinels[1]}` } });
     diagnostics.handlePackageEvent({ type: "worker-error", error: { message: `package ${sentinels[2]}` } });

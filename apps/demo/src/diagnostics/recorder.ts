@@ -19,6 +19,7 @@ import {
 } from "./model";
 import {
   sanitizeCheckpointDetails,
+  sanitizeBareMimeType,
   sanitizeEnvironmentText,
   sanitizePlatformText,
   sanitizeSensitiveText,
@@ -90,12 +91,6 @@ const TERMINAL_STATUSES = new Set<DiagnosticSessionStatus>([
   "cancelled",
   "clean-shutdown",
   "unexpected-termination",
-]);
-const TERMINAL_CHECKPOINT_TYPES = new Set<DiagnosticCheckpointType>([
-  "success",
-  "error",
-  "cancelled",
-  "clean-shutdown",
 ]);
 type StoreLoadKind = "ok" | "corrupt" | "unsupported";
 type MarkerMigration =
@@ -766,12 +761,8 @@ function firstTwo(value: unknown): unknown[] {
 }
 
 function safeBareMimeType(value: unknown): string | undefined {
-  if (
-    typeof value !== "string" ||
-    !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(value)
-  ) return undefined;
-  const subtype = value.slice(value.indexOf("/") + 1);
-  return /\.(?:wav|m4a)(?:$|[+.-])/iu.test(subtype) ? undefined : value;
+  const mimeType = sanitizeBareMimeType(value);
+  return mimeType === "" ? undefined : mimeType;
 }
 
 function safeInputDetails(value: unknown): Record<string, unknown> {
@@ -851,12 +842,6 @@ function migrateMarker(raw: string | null): MarkerMigration {
   }
   const marker = parseActiveMarker(parsed);
   return marker ? { kind: "ok", marker } : { kind: "corrupt" };
-}
-
-function hasTerminalCheckpoint(session: DiagnosticSession): boolean {
-  return session.checkpoints.some((checkpoint) =>
-    TERMINAL_CHECKPOINT_TYPES.has(checkpoint.type)
-  );
 }
 
 function reconstructSession(session: DiagnosticSession): DiagnosticSession | null {

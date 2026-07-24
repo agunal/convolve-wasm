@@ -44,6 +44,7 @@ const ERROR_SOURCES = new Set([
   "decode", "worker", "window", "promise", "audio", "processing", "wasm",
 ]);
 const MIME_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u;
+const FILENAME_SUBTYPE = /\.(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,16}$/u;
 const STAGES = new Set([
   "decode-a", "decode-b", "load-wasm", "validate", "convolve", "beat-detect",
   "beat-pan", "append-reverse", "normalize", "encode", "done",
@@ -172,12 +173,18 @@ function beatPan(value: unknown): "a" | "b" | null | undefined {
   return value === "a" || value === "b" || value === null ? value : undefined;
 }
 
-function mimeType(value: unknown): string | undefined {
-  if (value === "") return "";
+export function sanitizeBareMimeType(value: unknown): string {
   const text = typeof value === "string"
     ? value.slice(0, MAX_SHORT_TEXT).replace(/[\u0000-\u001f\u007f]/gu, " ").trim()
-    : undefined;
-  return text !== undefined && MIME_TYPE.test(text) ? text : undefined;
+    : "";
+  const subtype = text.slice(text.indexOf("/") + 1);
+  return MIME_TYPE.test(text) && !FILENAME_SUBTYPE.test(subtype) ? text : "";
+}
+
+function mimeType(value: unknown): string | undefined {
+  if (value === "") return "";
+  const text = sanitizeBareMimeType(value);
+  return text === "" ? undefined : text;
 }
 
 function add(output: DiagnosticDetails, key: string, value: DiagnosticScalar | undefined): void {

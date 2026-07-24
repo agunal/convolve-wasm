@@ -89,6 +89,15 @@ describe("diagnostic privacy filtering", () => {
       slot: "a", mimeType: "audio/wav;name=private-recording.wav", encodedBytes: 1,
     })).toEqual({ slot: "a", encodedBytes: 1 });
   });
+  it.each(["audio/private-recording.mp3", "audio/private-recording.flac", "audio/private-recording.7z"])(
+    "rejects filename-shaped bare MIME essence %s at the schema-v1 persistence boundary",
+    (mimeType) => {
+      expect(sanitizeCheckpointDetails("input", {
+        slot: "a", mimeType, encodedBytes: 1,
+      })).toEqual({ slot: "a", encodedBytes: 1 });
+    },
+  );
+
 
   it.each([
     ["audio name", "Could not decode secret-take.wav", "secret-take"],
