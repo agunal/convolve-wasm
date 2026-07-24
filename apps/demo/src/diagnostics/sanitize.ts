@@ -6,11 +6,14 @@ import type {
 
 const MAX_ERROR_TEXT = 512;
 const MAX_SHORT_TEXT = 120;
-const AUDIO_NAME = /\b[^\s"'<>\\/]+\.(?:wav|m4a)\b/giu;
+const AUDIO_NAME = /(?:["'][^"'<>\r\n]+\.(?:wav|m4a)["'])|(?:^|[\s("'=])(?:[^\s"'<>\\/:]+(?:[ \t]+[^\s"'<>\\/:]+)*)\.(?:wav|m4a)\b/giu;
 const BLOB_URL = /\bblob:[^\s"'<>]+/giu;
+const HTTP_URL = /\bhttps?:\/\/[^\s"'<>]+/giu;
 const FILE_URL = /\bfile:\/\/[^\s"'<>]+/giu;
-const WINDOWS_PATH = /\b[A-Za-z]:\\[^\s"'<>]*/gu;
-const POSIX_PATH = /(^|[\s("'=])\/(?:[^/\s"'<>]+\/)+[^/\s"'<>]*/gu;
+const WINDOWS_PATH = /\b[A-Za-z]:\\[^\r\n"'<>]*/gu;
+const UNC_PATH = /\\\\[^\r\n"'<>]*/gu;
+const RELATIVE_PATH = /(^|[\s("'=])(?:\.\.?[\\/])[^\r\n"'<>]*/gu;
+const POSIX_PATH = /(^|[\s("'=])\/[^\r\n"'<>]*/gu;
 
 const ERROR_DETAIL_KEYS = [
   "estimatedBytes",
@@ -39,8 +42,11 @@ export function sanitizeSensitiveText(value: unknown): string {
   const text = typeof value === "string" ? value : "";
   return text
     .replace(BLOB_URL, "[redacted-blob-url]")
+    .replace(HTTP_URL, "[redacted-source-url]")
     .replace(FILE_URL, "[redacted-file-url]")
     .replace(WINDOWS_PATH, "[redacted-path]")
+    .replace(UNC_PATH, "[redacted-path]")
+    .replace(RELATIVE_PATH, "$1[redacted-path]")
     .replace(POSIX_PATH, "$1[redacted-path]")
     .replace(AUDIO_NAME, "[redacted-audio-name]")
     .replace(/[\u0000-\u001f\u007f]/gu, " ")

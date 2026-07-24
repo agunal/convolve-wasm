@@ -141,6 +141,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
 function own(value: unknown, key: string): unknown {
   if (!isRecord(value)) return undefined;
   try {
@@ -216,16 +226,17 @@ function parseCheckpoint(value: unknown): DiagnosticCheckpoint | null {
   const type = own(value, "type");
   const checkpointTimestamp = timestamp(own(value, "timestamp"));
   const elapsedMs = finiteNumber(own(value, "elapsedMs"));
+  const details = own(value, "details");
   if (
     sequence === null || typeof type !== "string" || !CHECKPOINT_TYPES.has(type as DiagnosticCheckpointType) ||
-    checkpointTimestamp === null || elapsedMs === null || elapsedMs < 0
+    checkpointTimestamp === null || elapsedMs === null || elapsedMs < 0 || !isPlainRecord(details)
   ) return null;
   return {
     sequence,
     type: type as DiagnosticCheckpointType,
     timestamp: checkpointTimestamp,
     elapsedMs,
-    details: sanitizeCheckpointDetails(type as DiagnosticCheckpointType, own(value, "details")),
+    details: sanitizeCheckpointDetails(type as DiagnosticCheckpointType, details),
   };
 }
 
