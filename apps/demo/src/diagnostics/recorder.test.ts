@@ -172,6 +172,7 @@ describe("DiagnosticRecorder", () => {
       "PRIVATE_STACK",
       "PRIVATE_BINARY",
       "PRIVATE_FILE_NAME",
+      "PRIVATE_BARE_NAME.wav",
       "PRIVATE_PATH_SEGMENT",
       "PRIVATE_URL_SEGMENT",
       "PRIVATE_AUDIO_SAMPLE",
@@ -219,6 +220,10 @@ describe("DiagnosticRecorder", () => {
         encodedBytes: -1,
         fileName: "PRIVATE_FILE_NAME.wav",
         bytes: new TextEncoder().encode("PRIVATE_BINARY"),
+      }, {
+        slot: "b",
+        mimeType: "audio/PRIVATE_BARE_NAME.wav",
+        encodedBytes: 1,
       }],
       options: {
         appendReverse: "yes",
@@ -256,6 +261,19 @@ describe("DiagnosticRecorder", () => {
     expect(new TextEncoder().encode(JSON.stringify(session)).byteLength)
       .toBeLessThanOrEqual(32_768);
   });
+
+  it.each(["audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a"])(
+    "retains legitimate bare MIME type %s",
+    (mimeType) => {
+      const recorder = makeRecorder(new FakeStorage());
+      const input = startInput(`mime-${mimeType.replaceAll("/", "-")}`);
+      input.inputs = [{ slot: "a", mimeType, encodedBytes: 1 }];
+      recorder.startSession(input);
+      expect(recorder.snapshot().sessions[0]?.checkpoints.find(
+        (checkpoint) => checkpoint.type === "input",
+      )?.details.mimeType).toBe(mimeType);
+    },
+  );
 
   it.each([
     ["corrupt JSON", "{not-json", "recovered-corruption"],
@@ -422,13 +440,19 @@ describe("DiagnosticRecorder", () => {
   });
 
   it("creates an explicitly limited marker-only inference after ring corruption", () => {
-    const recorder = makeRecorder(seedMarkerWithCorruptRing());
+    const storage = seedMarkerWithCorruptRing();
+    const recorder = makeRecorder(storage);
     expect(recorder.snapshot().sessions[0]).toMatchObject({
       status: "unexpected-termination",
       inference: { markerOnly: true },
     });
     expect(recorder.snapshot().sessions[0]?.inference?.statement.toLowerCase())
       .toContain("does not establish out-of-memory or any exact cause");
+    expect(storage.operations.slice(-3)).toEqual([
+      `remove:${DIAGNOSTIC_STORE_KEY}`,
+      `set:${DIAGNOSTIC_STORE_KEY}`,
+      `remove:${DIAGNOSTIC_ACTIVE_KEY}`,
+    ]);
   });
 
   it("retains a marker-only recovered subject when the ring already has six sessions", () => {

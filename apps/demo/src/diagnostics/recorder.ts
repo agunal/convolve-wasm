@@ -314,9 +314,11 @@ export class DiagnosticRecorder {
       this.storageState = storeKind === "unsupported"
         ? "unsupported-schema"
         : "recovered-corruption";
-      this.resetRecorderKeys();
       if (storeKind === "corrupt" && markerMigration.kind === "ok") {
-        this.recover(markerMigration.marker, true);
+        this.discardStorePreservingState();
+        this.recover(markerMigration.marker);
+      } else {
+        this.resetRecorderKeys();
       }
       return;
     }
@@ -350,6 +352,15 @@ export class DiagnosticRecorder {
     return "ok";
   }
 
+  private discardStorePreservingState(): void {
+    if (!this.storage) return;
+    try {
+      this.storage.removeItem(DIAGNOSTIC_STORE_KEY);
+    } catch {
+      this.storage = null;
+    }
+  }
+
   private resetRecorderKeys(): void {
     const storage = this.storage;
     if (!storage) return;
@@ -373,12 +384,12 @@ export class DiagnosticRecorder {
     }
   }
 
-  private recover(marker: ActiveSessionMarker, markerAlreadyRemoved = false): void {
+  private recover(marker: ActiveSessionMarker): void {
     const existing = this.sessions.find((session) => session.id === marker.sessionId);
     if (existing && (
       existing.status !== "active" || hasTerminalCheckpoint(existing)
     )) {
-      if (!markerAlreadyRemoved) this.removeActiveMarker();
+      this.removeActiveMarker();
       return;
     }
 
@@ -397,7 +408,7 @@ export class DiagnosticRecorder {
     this.recoveredSessionId = recovered.id;
     this.sortAndRetain();
     this.persistRing();
-    if (!markerAlreadyRemoved) this.removeActiveMarker();
+    this.removeActiveMarker();
   }
 
   private markerOnlySession(marker: ActiveSessionMarker): DiagnosticSession {
@@ -679,16 +690,22 @@ function firstTwo(value: unknown): unknown[] {
   }
 }
 
+function safeBareMimeType(value: unknown): string | undefined {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(value)
+  ) return undefined;
+  const subtype = value.slice(value.indexOf("/") + 1);
+  return /\.(?:wav|m4a)(?:$|[+.-])/iu.test(subtype) ? undefined : value;
+}
+
 function safeInputDetails(value: unknown): Record<string, unknown> {
   const slot = ownData(value, "slot");
   const mimeType = ownData(value, "mimeType");
   const encodedBytes = ownData(value, "encodedBytes");
   return {
     slot: slot === "a" || slot === "b" ? slot : undefined,
-    mimeType: typeof mimeType === "string" &&
-      /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(mimeType)
-      ? mimeType
-      : undefined,
+    mimeType: safeBareMimeType(mimeType),
     encodedBytes: typeof encodedBytes === "number" &&
       Number.isFinite(encodedBytes) && encodedBytes >= 0
       ? encodedBytes
